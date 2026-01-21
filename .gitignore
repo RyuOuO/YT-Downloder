@@ -1,0 +1,23 @@
+# PyInstaller
+build/
+dist/
+*.spec
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Local binaries (users should download these themselves or use the build script)
+bin/
+ffmpeg-release-essentials.zip
+ffmpeg_temp/
+
+# Logs and temporary files
+*.log
+config.json
