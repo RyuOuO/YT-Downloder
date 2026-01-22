@@ -1,5 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox, filedialog
+import ttkbootstrap as ttk
+from ttkbootstrap.constants import *
 import subprocess
 import json
 import os
@@ -9,17 +11,17 @@ import re
 import instaloader
 import urllib.request
 import webbrowser
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageOps, ImageDraw
 from io import BytesIO
 
-CURRENT_VERSION = "v1.2.2"
+CURRENT_VERSION = "v1.3.0"
 GITHUB_REPO = "RyuOuO/YT-Downloder"
 
-class App(tk.Tk):
+class App(ttk.Window):
     def __init__(self):
-        super().__init__()
-        self.title(f"Universal Video & IG Photo Downloader ({CURRENT_VERSION})")
-        self.geometry("900x850")
+        super().__init__(themename="darkly")
+        self.title(f"Universal Downloader {CURRENT_VERSION}")
+        self.geometry("900x800")
         
         # --- High DPI Support ---
         try:
@@ -28,11 +30,7 @@ class App(tk.Tk):
         except:
             pass
 
-        # --- Theme Config (Dark Mode Only) ---
-        self.colors = {"bg": "#2d2d2d", "fg": "white", "entry_bg": "#404040", "text_bg": "#404040"}
-
-        # --- Paths & Config ---
-        # Use home directory for config
+        # --- Config & Paths ---
         self.user_home = os.path.expanduser("~")
         self.config_path = os.path.join(self.user_home, ".yt_downloader_config.json")
 
@@ -45,21 +43,17 @@ class App(tk.Tk):
         self.yt_dlp_path = os.path.join(self.base_path, "bin", f"yt-dlp{exe_ext}")
         self.ffmpeg_path = os.path.join(self.base_path, "bin")
 
-        self.grid_columnconfigure(0, weight=1)
-
-        # --- UI Construction ---
-        self.create_widgets()
-        
-        # --- State ---
         self.video_formats = []
         self.audio_formats = []
         self.last_analyzed_url = ""
         self.analysis_timer = None
         self.thumbnail_image = None
         
+        # --- UI Construction ---
+        self.create_widgets()
+        
         # --- Init ---
         self.load_config()
-        self.apply_theme() # Force apply dark theme
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.after(1000, self.check_for_updates)
         self.bind("<FocusIn>", self.check_clipboard)
@@ -70,128 +64,140 @@ class App(tk.Tk):
         self.update_log_interval = 100
 
     def create_widgets(self):
-        # Top Frame
-        top_frame = ttk.Frame(self)
-        top_frame.grid(row=0, column=0, columnspan=2, padx=10, pady=5, sticky="ew")
-        top_frame.grid_columnconfigure(0, weight=1)
+        # Custom Fonts
+        title_font = ("Helvetica", 16, "bold")
+        header_font = ("Helvetica", 11, "bold")
+        
+        # Main Container
+        main_frame = ttk.Frame(self, padding=20)
+        main_frame.pack(fill=BOTH, expand=True)
 
-        ttk.Label(top_frame, text="Video/Photo URL:").grid(row=0, column=0, sticky="w")
+        # --- Header ---
+        header_frame = ttk.Frame(main_frame)
+        header_frame.pack(fill=X, pady=(0, 20))
+        ttk.Label(header_frame, text="⬇ Universal Downloader", font=title_font, bootstyle="inverse-primary").pack(side=LEFT, padx=5, ipady=5, ipadx=10)
+        ttk.Label(header_frame, text="YouTube • Instagram • Facebook • Threads", font=("Helvetica", 9), bootstyle="secondary").pack(side=LEFT, padx=10)
+
+        # --- Input Section ---
+        input_group = ttk.Labelframe(main_frame, text=" 🔗 Link Input ", padding=15, bootstyle="info")
+        input_group.pack(fill=X, pady=(0, 15))
+        
         self.url_var = tk.StringVar()
         self.url_var.trace("w", self.on_url_change)
-        self.url_entry = ttk.Entry(top_frame, textvariable=self.url_var)
-        self.url_entry.grid(row=1, column=0, sticky="ew")
         
-        btn_frame = ttk.Frame(top_frame)
-        btn_frame.grid(row=1, column=1, padx=5)
-        self.analyze_button = ttk.Button(btn_frame, text="Analyze", command=self.start_analysis)
-        self.analyze_button.pack(side="left")
+        url_container = ttk.Frame(input_group)
+        url_container.pack(fill=X)
         
-        # Options
-        opts_frame = ttk.Frame(top_frame)
-        opts_frame.grid(row=2, column=0, columnspan=2, sticky="w", pady=5)
+        url_entry = ttk.Entry(url_container, textvariable=self.url_var, font=("Consolas", 10))
+        url_entry.pack(side=LEFT, fill=X, expand=True, padx=(0, 10))
         
-        self.embed_subs_var = tk.BooleanVar(value=False)
-        self.subs_check = ttk.Checkbutton(opts_frame, text="Embed Subtitles", variable=self.embed_subs_var, command=self.on_subs_change)
-        self.subs_check.pack(side="left", padx=5)
-        
-        self.sub_lang_var = tk.StringVar()
-        self.sub_lang_combo = ttk.Combobox(opts_frame, textvariable=self.sub_lang_var, state="readonly", width=30)
-        self.sub_lang_combo.pack(side="left", padx=5)
-        self.sub_lang_combo.set("Analyze to see subtitles")
-        self.sub_lang_combo["state"] = "disabled"
+        self.analyze_button = ttk.Button(url_container, text="🔍 Analyze", command=self.start_analysis, bootstyle="info", width=10)
+        self.analyze_button.pack(side=LEFT)
 
-        # Save Directory
-        ttk.Label(top_frame, text="Save to:").grid(row=3, column=0, sticky="w", pady=(5, 0))
-        self.save_path_var = tk.StringVar()
-        save_entry = ttk.Entry(top_frame, textvariable=self.save_path_var, state="readonly")
-        save_entry.grid(row=4, column=0, sticky="ew")
-        self.browse_button = ttk.Button(top_frame, text="Browse...", command=self.select_save_directory)
-        self.browse_button.grid(row=4, column=1, padx=(5, 0))
+        # --- Settings & Preview Grid ---
+        grid_frame = ttk.Frame(main_frame)
+        grid_frame.pack(fill=BOTH, expand=True, pady=(0, 15))
+        grid_frame.columnconfigure(0, weight=3) # Left Settings
+        grid_frame.columnconfigure(1, weight=2) # Right Preview
 
-        # Thumbnail Area
-        self.thumb_label = ttk.Label(self, text="No Thumbnail", anchor="center")
-        self.thumb_label.grid(row=1, column=0, columnspan=2, pady=10)
-
-        # Format Selection
-        formats_frame = ttk.LabelFrame(self, text="Format Selection")
-        formats_frame.grid(row=2, column=0, columnspan=2, padx=10, pady=5, sticky="ew")
-        formats_frame.grid_columnconfigure(1, weight=1)
+        # Left Column: Settings
+        settings_frame = ttk.Labelframe(grid_frame, text=" ⚙️ Settings ", padding=15, bootstyle="default")
+        settings_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
         
-        ttk.Label(formats_frame, text="Video Quality:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
-        self.video_format_combo = ttk.Combobox(formats_frame, state="readonly")
-        self.video_format_combo.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
-        
-        ttk.Label(formats_frame, text="Audio Quality:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
-        self.audio_format_combo = ttk.Combobox(formats_frame, state="readonly")
-        self.audio_format_combo.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
-        
-        ttk.Label(formats_frame, text="Mode:").grid(row=2, column=0, padx=5, pady=5, sticky="w")
+        # Mode Selection
+        ttk.Label(settings_frame, text="Download Mode:", font=header_font).pack(anchor="w", pady=(0, 5))
         self.output_format = tk.StringVar(value="mp4")
         self.output_format.trace("w", self.on_mode_change)
         
-        radio_frame = ttk.Frame(formats_frame)
-        radio_frame.grid(row=2, column=1, sticky="w")
-        ttk.Radiobutton(radio_frame, text="MP4", variable=self.output_format, value="mp4").pack(side="left", padx=5)
-        ttk.Radiobutton(radio_frame, text="MKV", variable=self.output_format, value="mkv").pack(side="left", padx=5)
-        ttk.Radiobutton(radio_frame, text="Audio (MP3)", variable=self.output_format, value="mp3").pack(side="left", padx=5)
-        ttk.Radiobutton(radio_frame, text="IG Photo", variable=self.output_format, value="ig_photo").pack(side="left", padx=5)
-
-        # Download Button
-        self.download_button = ttk.Button(self, text="Download", command=self.download_content, state="disabled")
-        self.download_button.grid(row=3, column=0, columnspan=2, pady=10)
+        mode_box = ttk.Frame(settings_frame)
+        mode_box.pack(fill=X, pady=(0, 15))
         
-        # Progress & Log
+        # Custom styled radio buttons
+        modes = [(" Video (MP4)", "mp4"), (" Video (MKV)", "mkv"), (" Audio (MP3)", "mp3"), (" IG Photo", "ig_photo")]
+        for text, val in modes:
+            ttk.Radiobutton(mode_box, text=text, variable=self.output_format, value=val, bootstyle="info-toolbutton").pack(side=LEFT, fill=X, expand=True, padx=2)
+
+        # Quality Selection
+        ttk.Label(settings_frame, text="Quality:", font=header_font).pack(anchor="w", pady=(0, 5))
+        self.video_format_combo = ttk.Combobox(settings_frame, state="readonly", bootstyle="primary")
+        self.video_format_combo.pack(fill=X, pady=(0, 5))
+        self.video_format_combo.set("Waiting for analysis...")
+        
+        self.audio_format_combo = ttk.Combobox(settings_frame, state="readonly", bootstyle="secondary")
+        self.audio_format_combo.pack(fill=X, pady=(0, 15))
+        self.audio_format_combo.set("Waiting for analysis...")
+
+        # Subtitles & Extras
+        ttk.Label(settings_frame, text="Extras:", font=header_font).pack(anchor="w", pady=(0, 5))
+        extras_box = ttk.Frame(settings_frame)
+        extras_box.pack(fill=X)
+        
+        self.embed_subs_var = tk.BooleanVar(value=False)
+        self.subs_check = ttk.Checkbutton(extras_box, text="Embed Subtitles", variable=self.embed_subs_var, command=self.on_subs_change, bootstyle="round-toggle")
+        self.subs_check.pack(side=LEFT)
+        
+        self.sub_lang_var = tk.StringVar()
+        self.sub_lang_combo = ttk.Combobox(extras_box, textvariable=self.sub_lang_var, state="readonly", width=15)
+        self.sub_lang_combo.pack(side=LEFT, padx=10)
+        self.sub_lang_combo.set("No Subtitles")
+        
+        # Save Location
+        ttk.Label(settings_frame, text="Save Location:", font=header_font).pack(anchor="w", pady=(15, 5))
+        save_box = ttk.Frame(settings_frame)
+        save_box.pack(fill=X)
+        
+        self.save_path_var = tk.StringVar()
+        ttk.Entry(save_box, textvariable=self.save_path_var, state="readonly", bootstyle="secondary").pack(side=LEFT, fill=X, expand=True)
+        ttk.Button(save_box, text="📂", width=3, command=self.select_save_directory, bootstyle="secondary-outline").pack(side=LEFT, padx=(5, 0))
+
+        # Right Column: Preview
+        preview_frame = ttk.Labelframe(grid_frame, text=" 🖼️ Preview ", padding=10, bootstyle="warning")
+        preview_frame.grid(row=0, column=1, sticky="nsew")
+        
+        self.thumb_label = ttk.Label(preview_frame, text="No Media Selected", anchor="center", font=("Helvetica", 10))
+        self.thumb_label.pack(fill=BOTH, expand=True)
+
+        # --- Bottom Section ---
+        self.download_button = ttk.Button(main_frame, text="🚀 START DOWNLOAD", command=self.download_content, state="disabled", bootstyle="success-lg", width=30)
+        self.download_button.pack(pady=10)
+
+        # Progress
+        progress_frame = ttk.Frame(main_frame)
+        progress_frame.pack(fill=X)
         self.progress_var = tk.DoubleVar()
-        self.progressbar = ttk.Progressbar(self, variable=self.progress_var, maximum=100)
-        self.progressbar.grid(row=4, column=0, columnspan=2, padx=10, pady=5, sticky="ew")
+        self.progressbar = ttk.Progressbar(progress_frame, variable=self.progress_var, maximum=100, bootstyle="striped-success")
+        self.progressbar.pack(fill=X)
 
-        self.output_text = scrolledtext.ScrolledText(self, wrap=tk.WORD, height=12)
-        self.output_text.grid(row=5, column=0, columnspan=2, padx=10, pady=5, sticky="nsew")
-        self.grid_rowconfigure(5, weight=1)
-
-    def on_subs_change(self):
-        if self.embed_subs_var.get() and self.sub_lang_combo['values']:
-             if self.sub_lang_combo.get() != "No Subtitles":
-                self.sub_lang_combo["state"] = "readonly"
-        else:
-            self.sub_lang_combo["state"] = "disabled"
-
-    def apply_theme(self):
-        c = self.colors
-        self.configure(bg=c["bg"])
-        style = ttk.Style()
-        style.theme_use('clam') 
-        style.configure("TFrame", background=c["bg"])
-        style.configure("TLabel", background=c["bg"], foreground=c["fg"])
-        style.configure("TLabelframe", background=c["bg"], foreground=c["fg"])
-        style.configure("TLabelframe.Label", background=c["bg"], foreground=c["fg"])
-        style.configure("TRadiobutton", background=c["bg"], foreground=c["fg"], indicatorbackground=c["bg"], indicatorforeground=c["fg"])
-        style.configure("TCheckbutton", background=c["bg"], foreground=c["fg"], indicatorbackground=c["bg"], indicatorforeground=c["fg"])
-        style.configure("TButton", background="#404040", foreground="white", borderwidth=1)
-        style.map("TButton", background=[("active", "#505050")])
+        # Log
+        log_expander = ttk.Expander(main_frame, text="Show Logs", bootstyle="light")
+        log_expander.pack(fill=X, pady=5)
         
-        # macOS Combobox Performance Optimization
-        if sys.platform == "darwin":
-            style.configure("TCombobox", fieldbackground=c["entry_bg"], background=c["bg"], foreground=c["fg"], borderwidth=0, arrowsize=15)
-            style.map("TCombobox", fieldbackground=[("readonly", c["entry_bg"] )], background=[("readonly", c["bg"] )])
-        else:
-            style.configure("TCombobox", fieldbackground=c["entry_bg"], background=c["bg"], foreground=c["fg"])
-            
-        style.configure("TEntry", fieldbackground=c["entry_bg"], foreground=c["fg"], insertcolor=c["fg"])
-        
-        self.output_text.configure(bg=c["text_bg"], fg=c["fg"], insertbackground=c["fg"])
+        self.output_text = scrolledtext.ScrolledText(log_expander, height=8, font=("Consolas", 9), bg="#222", fg="#ddd", insertbackground="white")
+        self.output_text.pack(fill=BOTH, expand=True) # Note: user needs to click expander to see
 
+    # --- Logic (Kept mostly same, adjusted for new widgets) ---
+    # ... [Same helper methods as before: check_clipboard, load_thumbnail, etc.] ...
+    
     def load_thumbnail(self, url):
         try:
-            with urllib.request.urlopen(url) as u:
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req) as u:
                 raw_data = u.read()
             image = Image.open(BytesIO(raw_data))
-            image.thumbnail((320, 180)) 
+            
+            # Smart Resize: fit into preview area while keeping aspect ratio
+            target_w, target_h = 300, 250 
+            image.thumbnail((target_w, target_h), Image.Resampling.LANCZOS)
+            
             self.thumbnail_image = ImageTk.PhotoImage(image)
             self.thumb_label.configure(image=self.thumbnail_image, text="")
         except Exception as e:
             self.log(f"Thumbnail error: {e}")
-            self.thumb_label.configure(image='', text="(No Thumbnail)")
+            self.thumb_label.configure(image='', text="(No Preview)")
+
+    # ... [Rest of logic: check_clipboard, on_url_change, on_mode_change, log, process_log_queue, load_config, save_config, select_save_directory, on_closing, check_for_updates, prompt_update, start_analysis, analyze_url, download_content, download_ig_photo, download_video, run_download_process] ...
+    # I will inject the previous logic here to ensure completeness without typing it all out again if not needed, 
+    # but since I'm overwriting the file, I must include EVERYTHING.
 
     def check_clipboard(self, event=None):
         try:
@@ -200,7 +206,7 @@ class App(tk.Tk):
                 content != self.url_var.get() and 
                 content != self.last_analyzed_url):
                 self.url_var.set(content)
-                self.log(f"Pasted: {content}")
+                self.log(f"Detected: {content}")
         except: pass
 
     def on_url_change(self, *args):
@@ -219,18 +225,34 @@ class App(tk.Tk):
                 self.analysis_timer = self.after(800, self.start_analysis)
 
     def on_mode_change(self, *args):
-        if self.output_format.get() == "ig_photo":
+        mode = self.output_format.get()
+        if mode == "ig_photo":
             self.download_button["state"] = "normal"
             self.analyze_button["state"] = "disabled"
             self.subs_check["state"] = "disabled"
             self.sub_lang_combo["state"] = "disabled"
+            self.video_format_combo.set("Not applicable")
+            self.audio_format_combo.set("Not applicable")
         else:
             if not self.video_formats and not self.audio_formats:
                 self.download_button["state"] = "disabled"
+                self.video_format_combo.set("Waiting for analysis...")
+                self.audio_format_combo.set("Waiting for analysis...")
+            else:
+                self.download_button["state"] = "normal"
+                # Restore previous selections if available
+                if self.video_formats: self.video_format_combo.current(0)
+                
             self.analyze_button["state"] = "normal"
             self.subs_check["state"] = "normal"
-            if self.embed_subs_var.get() and self.sub_lang_combo.get() != "No Subtitles" and self.sub_lang_combo.get() != "Analyze to see subtitles":
-                 self.sub_lang_combo["state"] = "readonly"
+            self.on_subs_change()
+
+    def on_subs_change(self):
+        if self.embed_subs_var.get() and self.sub_lang_combo['values']:
+             if self.sub_lang_combo.get() != "No Subtitles":
+                self.sub_lang_combo["state"] = "readonly"
+        else:
+            self.sub_lang_combo["state"] = "disabled"
 
     def log(self, message):
         self.log_queue.append(message.strip())
@@ -258,8 +280,6 @@ class App(tk.Tk):
                     self.save_path_var.set(path)
                 else:
                     self.save_path_var.set(os.path.join(os.path.expanduser("~"), "Downloads"))
-                
-                self.dark_mode = config.get("dark_mode", False)
                 self.embed_subs_var.set(config.get("embed_subs", False))
         except:
             self.save_path_var.set(os.path.join(os.path.expanduser("~"), "Downloads"))
@@ -267,7 +287,6 @@ class App(tk.Tk):
     def save_config(self):
         config = {
             "save_path": self.save_path_var.get(),
-            "dark_mode": self.dark_mode,
             "embed_subs": self.embed_subs_var.get()
         }
         with open(self.config_path, "w") as f:
@@ -277,11 +296,9 @@ class App(tk.Tk):
         path = filedialog.askdirectory(initialdir=self.save_path_var.get())
         if path:
             self.save_path_var.set(path)
-            self.log(f"Save directory: {path}")
 
     def on_closing(self):
-        try:
-            self.save_config()
+        try: self.save_config() # pylint: disable=no-member
         except: pass
         self.destroy()
         os._exit(0)
@@ -337,13 +354,11 @@ class App(tk.Tk):
                 raise Exception("No data received.")
 
             info = json.loads(process.stdout.strip().split('\n')[0])
-            self.winfo_toplevel().title(info.get('title', 'Video Downloader'))
+            self.winfo_toplevel().title(f"Universal Downloader - {info.get('title', 'Unknown')}")
             
-            # Thumbnail
             thumb_url = info.get('thumbnail')
             if thumb_url: self.after_idle(self.load_thumbnail, thumb_url)
 
-            # Formats
             formats = info.get("formats", [])
             self.video_formats.clear()
             self.audio_formats.clear()
@@ -365,26 +380,20 @@ class App(tk.Tk):
             if self.video_formats: self.video_format_combo.set(self.video_formats[-1][0])
             if self.audio_formats: self.audio_format_combo.set(self.audio_formats[-1][0])
             
-            # --- Dynamic Subtitle Parsing ---
             subs = info.get('subtitles', {})
             auto_subs = info.get('automatic_captions', {})
-            
             manual_subs_list = []
             auto_subs_list = []
             seen_langs = set()
-
             def process_subs(source, target_list, tag):
                 for lang_code, sub_list in source.items():
                     name = sub_list[0].get('name', lang_code)
                     label = f"[{tag}] {lang_code} - {name}"
                     target_list.append(label)
-
             process_subs(subs, manual_subs_list, "Manual")
             process_subs(auto_subs, auto_subs_list, "Auto")
-            
             manual_subs_list.sort()
             auto_subs_list.sort()
-            
             available_subs = manual_subs_list + auto_subs_list
 
             if available_subs:
@@ -466,6 +475,9 @@ class App(tk.Tk):
 
         title = self.winfo_toplevel().title()
         sanitized_title = "".join(c for c in title if c.isalnum() or c in (' ', '.', '_')).rstrip()
+        # Keep title clean but informative
+        if "Universal Downloader" in title: sanitized_title = "Video" 
+        
         save_path = filedialog.asksaveasfilename(
             initialdir=self.save_path_var.get(),
             initialfile=f"{sanitized_title}.{output_format}",
@@ -496,7 +508,6 @@ class App(tk.Tk):
                     command.extend(["--write-subs", "--write-auto-subs", "--embed-subs", "--sub-langs", "all,-live_chat"])
             else:
                 command.extend(["--write-subs", "--write-auto-subs", "--embed-subs", "--sub-langs", "all,-live_chat"])
-            
             command.extend(["--sleep-subtitles", "2"])
 
         command.extend([
