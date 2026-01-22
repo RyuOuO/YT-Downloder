@@ -95,8 +95,14 @@ class App(tk.Tk):
         opts_frame.grid(row=2, column=0, columnspan=2, sticky="w", pady=5)
         
         self.embed_subs_var = tk.BooleanVar(value=False)
-        self.subs_check = ttk.Checkbutton(opts_frame, text="Embed Subtitles (YouTube)", variable=self.embed_subs_var)
+        self.subs_check = ttk.Checkbutton(opts_frame, text="Embed Subtitles", variable=self.embed_subs_var, command=self.on_subs_change)
         self.subs_check.pack(side="left", padx=5)
+        
+        self.sub_lang_var = tk.StringVar(value="zh-TW")
+        self.sub_lang_combo = ttk.Combobox(opts_frame, textvariable=self.sub_lang_var, state="readonly", width=10)
+        self.sub_lang_combo['values'] = ["zh-TW", "zh-CN", "en", "ja", "ko", "all"]
+        self.sub_lang_combo.pack(side="left", padx=5)
+        self.sub_lang_combo["state"] = "disabled" # Disabled by default until checked
 
         # Save Directory
         ttk.Label(top_frame, text="Save to:").grid(row=3, column=0, sticky="w", pady=(5, 0))
@@ -413,8 +419,14 @@ class App(tk.Tk):
             self.download_button["state"] = "normal"
             self.on_mode_change()
 
+    def on_subs_change(self):
+        if self.embed_subs_var.get():
+            self.sub_lang_combo["state"] = "readonly"
+        else:
+            self.sub_lang_combo["state"] = "disabled"
+
     def download_video(self):
-        # ... (Same logic but with Embed Subs support)
+        # ... (start of function is same)
         url = self.url_entry.get()
         output_format = self.output_format.get()
         is_mp3 = output_format == 'mp3'
@@ -452,7 +464,11 @@ class App(tk.Tk):
 
         # Embed Subs logic
         if self.embed_subs_var.get():
-            command.extend(["--write-subs", "--embed-subs", "--sub-langs", "all,-live_chat"])
+            lang = self.sub_lang_var.get()
+            # If specific lang selected, try that first, then English, then all
+            # This ensures we get *something* if the specific lang is missing
+            sub_langs = f"{lang},en,all,-live_chat" if lang != "all" else "all,-live_chat"
+            command.extend(["--write-subs", "--write-auto-subs", "--embed-subs", "--sub-langs", sub_langs])
 
         command.extend([
             "--ffmpeg-location", self.ffmpeg_path, "-o", save_path, 
