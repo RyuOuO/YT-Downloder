@@ -57,7 +57,7 @@ class App(tk.Tk):
         self.audio_formats = []
         self.last_analyzed_url = ""
         self.analysis_timer = None
-        self.thumbnail_image = None # Keep reference
+        self.thumbnail_image = None
         
         # --- Init ---
         self.load_config()
@@ -72,7 +72,7 @@ class App(tk.Tk):
         self.update_log_interval = 100
 
     def create_widgets(self):
-        # Top Frame: Inputs & Buttons
+        # Top Frame
         top_frame = ttk.Frame(self)
         top_frame.grid(row=0, column=0, columnspan=2, padx=10, pady=5, sticky="ew")
         top_frame.grid_columnconfigure(0, weight=1)
@@ -98,11 +98,11 @@ class App(tk.Tk):
         self.subs_check = ttk.Checkbutton(opts_frame, text="Embed Subtitles", variable=self.embed_subs_var, command=self.on_subs_change)
         self.subs_check.pack(side="left", padx=5)
         
-        self.sub_lang_var = tk.StringVar(value="zh-TW")
-        self.sub_lang_combo = ttk.Combobox(opts_frame, textvariable=self.sub_lang_var, state="readonly", width=10)
-        self.sub_lang_combo['values'] = ["zh-TW", "zh-CN", "en", "ja", "ko", "all"]
+        self.sub_lang_var = tk.StringVar()
+        self.sub_lang_combo = ttk.Combobox(opts_frame, textvariable=self.sub_lang_var, state="readonly", width=30)
         self.sub_lang_combo.pack(side="left", padx=5)
-        self.sub_lang_combo["state"] = "disabled" # Disabled by default until checked
+        self.sub_lang_combo.set("Analyze to see subtitles")
+        self.sub_lang_combo["state"] = "disabled"
 
         # Save Directory
         ttk.Label(top_frame, text="Save to:").grid(row=3, column=0, sticky="w", pady=(5, 0))
@@ -153,7 +153,14 @@ class App(tk.Tk):
         self.output_text.grid(row=5, column=0, columnspan=2, padx=10, pady=5, sticky="nsew")
         self.grid_rowconfigure(5, weight=1)
 
-    # --- Theme Logic ---
+    def on_subs_change(self):
+        if self.embed_subs_var.get() and self.sub_lang_combo['values']:
+             # Only enable if there are values to select (i.e. after analysis)
+             if self.sub_lang_combo.get() != "No Subtitles":
+                self.sub_lang_combo["state"] = "readonly"
+        else:
+            self.sub_lang_combo["state"] = "disabled"
+
     def toggle_theme(self):
         self.dark_mode = not self.dark_mode
         self.apply_theme()
@@ -174,21 +181,18 @@ class App(tk.Tk):
         self.output_text.configure(bg=c["text_bg"], fg=c["fg"], insertbackground=c["fg"])
         self.url_entry.configure(background=c["entry_bg"])
 
-    # --- Core Logic ---
     def load_thumbnail(self, url):
         try:
             with urllib.request.urlopen(url) as u:
                 raw_data = u.read()
             image = Image.open(BytesIO(raw_data))
-            # Resize
-            image.thumbnail((320, 180)) # 16:9 aspect ratio
+            image.thumbnail((320, 180)) 
             self.thumbnail_image = ImageTk.PhotoImage(image)
             self.thumb_label.configure(image=self.thumbnail_image, text="")
         except Exception as e:
-            self.log(f"Failed to load thumbnail: {e}")
+            self.log(f"Thumbnail error: {e}")
             self.thumb_label.configure(image='', text="(No Thumbnail)")
 
-    # ... (Keep previous utility methods: check_clipboard, on_url_change, etc.)
     def check_clipboard(self, event=None):
         try:
             content = self.clipboard_get()
@@ -219,13 +223,16 @@ class App(tk.Tk):
             self.download_button["state"] = "normal"
             self.analyze_button["state"] = "disabled"
             self.subs_check["state"] = "disabled"
+            self.sub_lang_combo["state"] = "disabled"
         else:
             if not self.video_formats and not self.audio_formats:
                 self.download_button["state"] = "disabled"
             self.analyze_button["state"] = "normal"
             self.subs_check["state"] = "normal"
+            # Re-enable sub combo if checked and has values
+            if self.embed_subs_var.get() and self.sub_lang_combo.get() != "No Subtitles" and self.sub_lang_combo.get() != "Analyze to see subtitles":
+                 self.sub_lang_combo["state"] = "readonly"
 
-    # ... (Keep log, save/load config logic)
     def log(self, message):
         self.log_queue.append(message.strip())
         if not self.is_log_updating:
@@ -278,7 +285,6 @@ class App(tk.Tk):
         self.destroy()
         sys.exit(0)
 
-    # --- Update Check ---
     def check_for_updates(self):
         def _check():
             try:
@@ -287,7 +293,6 @@ class App(tk.Tk):
                     data = json.loads(response.read().decode())
                     latest_version = data.get("tag_name", "")
                     if latest_version and latest_version != CURRENT_VERSION:
-                        # Basic version compare
                         v1 = [int(x) for x in latest_version.lstrip('v').split('.')]
                         v2 = [int(x) for x in CURRENT_VERSION.lstrip('v').split('.')]
                         if v1 > v2:
@@ -299,16 +304,12 @@ class App(tk.Tk):
         if messagebox.askyesno("Update Available", f"New version {version} available!\nDownload now?"):
             webbrowser.open(url)
 
-    # --- Analysis & Download ---
     def start_analysis(self):
         if self.output_format.get() == "ig_photo": return
         self.analyze_button["state"] = "disabled"
         self.download_button["state"] = "disabled"
         self.log("Auto-analyzing...")
-        
-        # Clear thumbnail
         self.thumb_label.configure(image='', text="Loading...")
-        
         threading.Thread(target=self.analyze_url, daemon=True).start()
 
     def analyze_url(self):
@@ -337,15 +338,14 @@ class App(tk.Tk):
             info = json.loads(process.stdout.strip().split('\n')[0])
             self.winfo_toplevel().title(info.get('title', 'Video Downloader'))
             
-            # Load Thumbnail
+            # Thumbnail
             thumb_url = info.get('thumbnail')
-            if thumb_url:
-                self.after_idle(self.load_thumbnail, thumb_url)
+            if thumb_url: self.after_idle(self.load_thumbnail, thumb_url)
 
+            # Formats
             formats = info.get("formats", [])
             self.video_formats.clear()
             self.audio_formats.clear()
-
             for f in formats:
                 filesize = f.get('filesize') or f.get('filesize_approx')
                 size_mb = f"~{filesize / (1024*1024):.1f}MB" if filesize else "N/A"
@@ -364,6 +364,34 @@ class App(tk.Tk):
             if self.video_formats: self.video_format_combo.set(self.video_formats[-1][0])
             if self.audio_formats: self.audio_format_combo.set(self.audio_formats[-1][0])
             
+            # Subtitles
+            subs = info.get('subtitles', {})
+            auto_subs = info.get('automatic_captions', {})
+            available_subs = []
+            seen_langs = set()
+            def add_subs(source, prefix=""):
+                for lang_code, sub_list in source.items():
+                    if lang_code not in seen_langs:
+                        name = sub_list[0].get('name', lang_code)
+                        label = f"{lang_code} - {name} {prefix}"
+                        available_subs.append(label)
+                        seen_langs.add(lang_code)
+            add_subs(subs, "(Manual)")
+            add_subs(auto_subs, "(Auto)")
+            available_subs.sort()
+
+            if available_subs:
+                self.sub_lang_combo['values'] = available_subs
+                self.sub_lang_combo.set(available_subs[0])
+                self.subs_check["state"] = "normal"
+                if self.embed_subs_var.get():
+                    self.sub_lang_combo["state"] = "readonly"
+            else:
+                self.sub_lang_combo.set("No Subtitles")
+                self.sub_lang_combo['values'] = []
+                self.sub_lang_combo["state"] = "disabled"
+                self.subs_check["state"] = "disabled"
+
             self.log(f"Analysis complete: {info.get('title', 'Unknown')}")
             self.download_button["state"] = "normal"
         except Exception as e:
@@ -380,16 +408,13 @@ class App(tk.Tk):
             self.download_video()
 
     def download_ig_photo(self):
-        # ... (Existing IG Photo Logic - Same as before)
         url = self.url_entry.get()
         save_dir = self.save_path_var.get()
         if not save_dir: messagebox.showerror("Error", "Select save dir."); return
-
         self.log("Starting IG Photo download...")
         self.download_button["state"] = "disabled"
         self.analyze_button["state"] = "disabled"
         self.progress_var.set(10)
-
         try:
             L = instaloader.Instaloader(
                 download_pictures=True, download_videos=False, 
@@ -399,7 +424,6 @@ class App(tk.Tk):
             match = re.search(r"instagram\.com/(?:p|reel)/([^/?#&]+)", url)
             if not match: raise ValueError("No shortcode found.")
             shortcode = match.group(1)
-            
             post = instaloader.Post.from_shortcode(L.context, shortcode)
             cwd = os.getcwd()
             try:
@@ -407,7 +431,6 @@ class App(tk.Tk):
                 L.download_post(post, target=shortcode)
             finally:
                 os.chdir(cwd)
-            
             self.progress_var.set(100)
             self.log("Complete!")
             messagebox.showinfo("Success", f"Saved to {shortcode}")
@@ -419,14 +442,7 @@ class App(tk.Tk):
             self.download_button["state"] = "normal"
             self.on_mode_change()
 
-    def on_subs_change(self):
-        if self.embed_subs_var.get():
-            self.sub_lang_combo["state"] = "readonly"
-        else:
-            self.sub_lang_combo["state"] = "disabled"
-
     def download_video(self):
-        # ... (start of function is same)
         url = self.url_entry.get()
         output_format = self.output_format.get()
         is_mp3 = output_format == 'mp3'
@@ -462,13 +478,13 @@ class App(tk.Tk):
             elif video_id: command.extend(["-f", f"{video_id}"])
             if output_format in ['mp4', 'mkv']: command.extend(["--merge-output-format", output_format])
 
-        # Embed Subs logic
         if self.embed_subs_var.get():
-            lang = self.sub_lang_var.get()
-            # If specific lang selected, try that first, then English, then all
-            # This ensures we get *something* if the specific lang is missing
-            sub_langs = f"{lang},en,all,-live_chat" if lang != "all" else "all,-live_chat"
-            command.extend(["--write-subs", "--write-auto-subs", "--embed-subs", "--sub-langs", sub_langs])
+            full_text = self.sub_lang_combo.get()
+            if full_text and " - " in full_text:
+                lang_code = full_text.split(" - ")[0]
+                command.extend(["--write-subs", "--write-auto-subs", "--embed-subs", "--sub-langs", lang_code])
+            else:
+                command.extend(["--write-subs", "--write-auto-subs", "--embed-subs", "--sub-langs", "all,-live_chat"])
 
         command.extend([
             "--ffmpeg-location", self.ffmpeg_path, "-o", save_path, 
@@ -499,7 +515,7 @@ class App(tk.Tk):
                 self.after_idle(self.progress_var.set, 100)
                 messagebox.showinfo("Success", "Download complete!")
                 self.after_idle(self.reset_ui)
-                self.after_idle(lambda: self.thumb_label.configure(image='', text="No Thumbnail")) # Clear thumb
+                self.after_idle(lambda: self.thumb_label.configure(image='', text="No Thumbnail"))
             else:
                 self.after_idle(self.progress_var.set, 0)
                 messagebox.showerror("Error", "Download failed.")
