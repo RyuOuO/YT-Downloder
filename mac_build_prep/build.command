@@ -51,7 +51,7 @@ echo "PIL 路徑: $PIL_PATH"
 echo "正在打包應用程式，請稍候..."
 # 清理舊的 build
 rm -rf build dist *.spec
-python -m PyInstaller --name "YouTubeDownloader" --onefile --windowed --add-data "bin:bin" --paths "$PIL_PATH" --hidden-import=PIL --hidden-import=PIL._tkinter_finder --hidden-import=PIL.Image --hidden-import=PIL.ImageTk main.py
+python -m PyInstaller --name "YouTubeDownloader" --onefile --windowed --add-data "bin:bin" --add-data "$PIL_PATH:PIL" --paths "$PIL_PATH" --hidden-import=PIL --hidden-import=PIL._tkinter_finder --hidden-import=PIL.Image --hidden-import=PIL.ImageTk main.py
 
 # 7. 製作 .pkg 安裝檔
 echo "------------------------------------------"

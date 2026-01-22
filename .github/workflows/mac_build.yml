@@ -38,7 +38,7 @@ jobs:
       run: |
         PIL_PATH=$(python -c "import PIL; import os; print(os.path.dirname(PIL.__file__))")
         echo "PIL Path: $PIL_PATH"
-        python -m PyInstaller --name "YouTubeDownloader" --onefile --windowed --add-data "bin:bin" --paths "$PIL_PATH" --hidden-import=PIL --hidden-import=PIL._tkinter_finder --hidden-import=PIL.Image --hidden-import=PIL.ImageTk src/main.py
+        python -m PyInstaller --name "YouTubeDownloader" --onefile --windowed --add-data "bin:bin" --add-data "$PIL_PATH:PIL" --paths "$PIL_PATH" --hidden-import=PIL --hidden-import=PIL._tkinter_finder --hidden-import=PIL.Image --hidden-import=PIL.ImageTk src/main.py
 
     - name: 製作 PKG 安裝檔
       run: |
