@@ -142,8 +142,13 @@ class App(tk.Tk):
             self.analyze_button["state"] = "normal"
 
     def on_closing(self):
-        self.save_config()
+        try:
+            self.save_config()
+        except:
+            pass
         self.destroy()
+        # Force exit to ensure all threads are killed, especially on macOS
+        sys.exit(0)
 
     def reset_ui(self):
         self.url_entry.delete(0, tk.END)
