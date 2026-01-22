@@ -28,20 +28,18 @@ class App(tk.Tk):
         except:
             pass
 
-        # --- Theme Config ---
-        self.dark_mode = False
-        self.colors = {
-            "light": {"bg": "#f0f0f0", "fg": "black", "entry_bg": "white", "text_bg": "white"},
-            "dark": {"bg": "#2d2d2d", "fg": "white", "entry_bg": "#404040", "text_bg": "#404040"}
-        }
+        # --- Theme Config (Dark Mode Only) ---
+        self.colors = {"bg": "#2d2d2d", "fg": "white", "entry_bg": "#404040", "text_bg": "#404040"}
 
         # --- Paths & Config ---
+        # Use home directory for config
+        self.user_home = os.path.expanduser("~")
+        self.config_path = os.path.join(self.user_home, ".yt_downloader_config.json")
+
         if getattr(sys, 'frozen', False):
             self.base_path = sys._MEIPASS
-            self.config_path = os.path.join(os.path.dirname(sys.executable), "config.json")
         else:
             self.base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            self.config_path = os.path.join(self.base_path, "config.json")
 
         exe_ext = ".exe" if sys.platform == "win32" else ""
         self.yt_dlp_path = os.path.join(self.base_path, "bin", f"yt-dlp{exe_ext}")
@@ -61,7 +59,7 @@ class App(tk.Tk):
         
         # --- Init ---
         self.load_config()
-        self.apply_theme()
+        self.apply_theme() # Force apply dark theme
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.after(1000, self.check_for_updates)
         self.bind("<FocusIn>", self.check_clipboard)
@@ -87,9 +85,7 @@ class App(tk.Tk):
         btn_frame.grid(row=1, column=1, padx=5)
         self.analyze_button = ttk.Button(btn_frame, text="Analyze", command=self.start_analysis)
         self.analyze_button.pack(side="left")
-        self.theme_btn = ttk.Button(btn_frame, text="☀/🌙", width=5, command=self.toggle_theme)
-        self.theme_btn.pack(side="left", padx=5)
-
+        
         # Options
         opts_frame = ttk.Frame(top_frame)
         opts_frame.grid(row=2, column=0, columnspan=2, sticky="w", pady=5)
@@ -155,31 +151,29 @@ class App(tk.Tk):
 
     def on_subs_change(self):
         if self.embed_subs_var.get() and self.sub_lang_combo['values']:
-             # Only enable if there are values to select (i.e. after analysis)
              if self.sub_lang_combo.get() != "No Subtitles":
                 self.sub_lang_combo["state"] = "readonly"
         else:
             self.sub_lang_combo["state"] = "disabled"
 
-    def toggle_theme(self):
-        self.dark_mode = not self.dark_mode
-        self.apply_theme()
-
     def apply_theme(self):
-        theme = "dark" if self.dark_mode else "light"
-        c = self.colors[theme]
-        
+        c = self.colors
         self.configure(bg=c["bg"])
         style = ttk.Style()
+        style.theme_use('clam') 
         style.configure("TFrame", background=c["bg"])
         style.configure("TLabel", background=c["bg"], foreground=c["fg"])
         style.configure("TLabelframe", background=c["bg"], foreground=c["fg"])
         style.configure("TLabelframe.Label", background=c["bg"], foreground=c["fg"])
-        style.configure("TRadiobutton", background=c["bg"], foreground=c["fg"])
-        style.configure("TCheckbutton", background=c["bg"], foreground=c["fg"])
+        style.configure("TRadiobutton", background=c["bg"], foreground=c["fg"], indicatorbackground=c["bg"], indicatorforeground=c["fg"])
+        style.configure("TCheckbutton", background=c["bg"], foreground=c["fg"], indicatorbackground=c["bg"], indicatorforeground=c["fg"])
+        style.configure("TButton", background="#404040", foreground="white", borderwidth=1)
+        style.map("TButton", background=[("active", "#505050")])
+        style.configure("TCombobox", fieldbackground=c["entry_bg"], background=c["bg"], foreground=c["fg"])
+        style.configure("TEntry", fieldbackground=c["entry_bg"], foreground=c["fg"], insertcolor=c["fg"])
         
         self.output_text.configure(bg=c["text_bg"], fg=c["fg"], insertbackground=c["fg"])
-        self.url_entry.configure(background=c["entry_bg"])
+        # ttk.Entry does not support direct configure for colors, handled by style "TEntry" above
 
     def load_thumbnail(self, url):
         try:
@@ -229,7 +223,6 @@ class App(tk.Tk):
                 self.download_button["state"] = "disabled"
             self.analyze_button["state"] = "normal"
             self.subs_check["state"] = "normal"
-            # Re-enable sub combo if checked and has values
             if self.embed_subs_var.get() and self.sub_lang_combo.get() != "No Subtitles" and self.sub_lang_combo.get() != "Analyze to see subtitles":
                  self.sub_lang_combo["state"] = "readonly"
 
@@ -260,7 +253,7 @@ class App(tk.Tk):
                 else:
                     self.save_path_var.set(os.path.join(os.path.expanduser("~"), "Downloads"))
                 
-                self.dark_mode = config.get("dark_mode", False)
+                # Default dark mode always applied, setting saved but unused for toggle
                 self.embed_subs_var.set(config.get("embed_subs", False))
         except:
             self.save_path_var.set(os.path.join(os.path.expanduser("~"), "Downloads"))
@@ -268,7 +261,6 @@ class App(tk.Tk):
     def save_config(self):
         config = {
             "save_path": self.save_path_var.get(),
-            "dark_mode": self.dark_mode,
             "embed_subs": self.embed_subs_var.get()
         }
         with open(self.config_path, "w") as f:
@@ -281,9 +273,12 @@ class App(tk.Tk):
             self.log(f"Save directory: {path}")
 
     def on_closing(self):
-        self.save_config()
+        try:
+            self.save_config()
+        except: pass
         self.destroy()
-        sys.exit(0)
+        # Force kill process immediately to ensure clean exit on macOS
+        os._exit(0)
 
     def check_for_updates(self):
         def _check():
@@ -469,7 +464,7 @@ class App(tk.Tk):
             initialdir=self.save_path_var.get(),
             initialfile=f"{sanitized_title}.{output_format}",
             defaultextension=f".{output_format}",
-            filetypes=[(f"{output_format.upper()} Files", f"*.{output_format}"), ("All Files", "*.* אמיתי")]
+            filetypes=[(f"{output_format.upper()} Files", f"*.{output_format}"), ("All Files", "*.*")]
         )
 
         if not save_path: return
@@ -496,7 +491,6 @@ class App(tk.Tk):
             else:
                 command.extend(["--write-subs", "--write-auto-subs", "--embed-subs", "--sub-langs", "all,-live_chat"])
             
-            # Prevent rate limiting
             command.extend(["--sleep-subtitles", "2"])
 
         command.extend([
