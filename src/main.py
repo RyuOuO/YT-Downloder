@@ -12,7 +12,7 @@ import webbrowser
 from PIL import Image, ImageTk
 from io import BytesIO
 
-CURRENT_VERSION = "v1.2.0"
+CURRENT_VERSION = "v1.2.1"
 GITHUB_REPO = "RyuOuO/YT-Downloder"
 
 class App(tk.Tk):
