@@ -1,0 +1,49 @@
+name: Build macOS PKG
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch: # 允許手動點擊按鈕執行
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+    - name: 檢出程式碼
+      uses: actions/checkout@v4
+
+    - name: 設定 Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: 安裝依賴
+      run: |
+        pip install pyinstaller instaloader
+
+    - name: 準備下載工具 (yt-dlp & ffmpeg)
+      run: |
+        mkdir -p bin
+        # 下載 yt-dlp
+        curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos -o bin/yt-dlp
+        chmod +x bin/yt-dlp
+        # 下載 ffmpeg
+        curl -L https://evermeet.cx/ffmpeg/getrelease/zip -o ffmpeg.zip
+        unzip -o -q ffmpeg.zip -d bin
+        rm ffmpeg.zip
+        chmod +x bin/ffmpeg
+
+    - name: 執行 PyInstaller 打包
+      run: |
+        pyinstaller --name "YouTubeDownloader" --onefile --windowed --add-data "bin:bin" src/main.py
+
+    - name: 製作 PKG 安裝檔
+      run: |
+        pkgbuild --install-location /Applications --component "dist/YouTubeDownloader.app" "dist/YouTubeDownloader.pkg"
+
+    - name: 上傳打包成果
+      uses: actions/upload-artifact@v4
+      with:
+        name: YouTubeDownloader-macOS-PKG
+        path: dist/YouTubeDownloader.pkg

@@ -6,11 +6,12 @@ import os
 import threading
 import sys
 import re
+import instaloader
 
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("YouTube Downloader")
+        self.title("Universal Video & IG Photo Downloader")
         self.geometry("850x750")
 
         # --- Paths & Config ---
@@ -33,10 +34,12 @@ class App(tk.Tk):
         top_frame.grid_columnconfigure(0, weight=1)
 
         # URL Input
-        ttk.Label(top_frame, text="Video URL:").grid(row=0, column=0, sticky="w")
-        self.url_entry = ttk.Entry(top_frame)
+        ttk.Label(top_frame, text="Video/Photo URL:").grid(row=0, column=0, sticky="w")
+        self.url_var = tk.StringVar()
+        self.url_var.trace("w", self.on_url_change)
+        self.url_entry = ttk.Entry(top_frame, textvariable=self.url_var)
         self.url_entry.grid(row=1, column=0, sticky="ew")
-        self.analyze_button = ttk.Button(top_frame, text="Analyze URL", command=self.start_analysis)
+        self.analyze_button = ttk.Button(top_frame, text="Analyze URL (Video Only)", command=self.start_analysis)
         self.analyze_button.grid(row=1, column=1, padx=(5, 0))
         
         # Save Directory
@@ -51,21 +54,28 @@ class App(tk.Tk):
         formats_frame = ttk.LabelFrame(self, text="Format Selection")
         formats_frame.grid(row=1, column=0, columnspan=2, padx=10, pady=10, sticky="ew")
         formats_frame.grid_columnconfigure(1, weight=1)
-        # ... (rest of format selection widgets are the same)
+        
         ttk.Label(formats_frame, text="Video Quality:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
         self.video_format_combo = ttk.Combobox(formats_frame, state="readonly")
         self.video_format_combo.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+        
         ttk.Label(formats_frame, text="Audio Quality:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
         self.audio_format_combo = ttk.Combobox(formats_frame, state="readonly")
         self.audio_format_combo.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
-        ttk.Label(formats_frame, text="Output Format:").grid(row=2, column=0, padx=5, pady=5, sticky="w")
+        
+        ttk.Label(formats_frame, text="Mode:").grid(row=2, column=0, padx=5, pady=5, sticky="w")
         self.output_format = tk.StringVar(value="mp4")
-        ttk.Radiobutton(formats_frame, text="MP4", variable=self.output_format, value="mp4").grid(row=2, column=1, padx=5, sticky="w")
-        ttk.Radiobutton(formats_frame, text="MKV", variable=self.output_format, value="mkv").grid(row=2, column=1, padx=5)
-        ttk.Radiobutton(formats_frame, text="MP3", variable=self.output_format, value="mp3").grid(row=2, column=1, padx=5, sticky="e")
+        
+        radio_frame = ttk.Frame(formats_frame)
+        radio_frame.grid(row=2, column=1, sticky="w")
+        
+        ttk.Radiobutton(radio_frame, text="Video (MP4)", variable=self.output_format, value="mp4").pack(side="left", padx=5)
+        ttk.Radiobutton(radio_frame, text="Video (MKV)", variable=self.output_format, value="mkv").pack(side="left", padx=5)
+        ttk.Radiobutton(radio_frame, text="Audio (MP3)", variable=self.output_format, value="mp3").pack(side="left", padx=5)
+        ttk.Radiobutton(radio_frame, text="IG Photo", variable=self.output_format, value="ig_photo").pack(side="left", padx=5)
 
         # Download & Output
-        self.download_button = ttk.Button(self, text="Download", command=self.download_video, state="disabled")
+        self.download_button = ttk.Button(self, text="Download", command=self.download_content, state="disabled")
         self.download_button.grid(row=2, column=0, columnspan=2, pady=5)
         
         self.progress_var = tk.DoubleVar()
@@ -78,13 +88,75 @@ class App(tk.Tk):
         
         self.video_formats = []
         self.audio_formats = []
+        self.last_analyzed_url = ""
+        self.analysis_timer = None
         
         self.load_config()
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self.output_format.trace("w", self.on_mode_change)
+        
+        # Clipboard check on focus
+        self.bind("<FocusIn>", self.check_clipboard)
+
+    def check_clipboard(self, event=None):
+        try:
+            content = self.clipboard_get()
+            # Simple check if it looks like a URL and is different from current
+            if content.startswith("http") and content != self.url_var.get():
+                self.url_var.set(content)
+                self.log(f"Auto-pasted from clipboard: {content}")
+        except:
+            pass
+
+    def on_url_change(self, *args):
+        """Auto-detects mode and triggers analysis."""
+        url = self.url_var.get().strip()
+        if not url: return
+
+        # Cancel any pending analysis
+        if self.analysis_timer:
+            self.after_cancel(self.analysis_timer)
+
+        # Mode switching logic
+        if "instagram.com/p/" in url or "instagram.com/reel/" in url:
+            if self.output_format.get() != "ig_photo":
+                self.output_format.set("ig_photo")
+                self.log("Auto-switched to IG Photo mode.")
+        else:
+            # Switch back to Video mode if currently in IG Photo mode
+            if self.output_format.get() == "ig_photo":
+                self.output_format.set("mp4")
+                self.log("Auto-switched to Video mode.")
+            
+            # Debounce auto-analysis: wait 800ms after user stops typing/pasting
+            if url != self.last_analyzed_url:
+                self.analysis_timer = self.after(800, self.start_analysis)
+
+    def on_mode_change(self, *args):
+        if self.output_format.get() == "ig_photo":
+            self.download_button["state"] = "normal"
+            self.analyze_button["state"] = "disabled"
+        else:
+            if not self.video_formats and not self.audio_formats:
+                self.download_button["state"] = "disabled"
+            self.analyze_button["state"] = "normal"
 
     def on_closing(self):
         self.save_config()
         self.destroy()
+
+    def reset_ui(self):
+        self.url_entry.delete(0, tk.END)
+        self.video_format_combo.set('')
+        self.video_format_combo['values'] = []
+        self.audio_format_combo.set('')
+        self.audio_format_combo['values'] = []
+        self.progress_var.set(0)
+        self.video_formats = []
+        self.audio_formats = []
+        self.last_analyzed_url = ""
+        self.log("Ready.")
+        self.on_mode_change()
 
     def load_config(self):
         try:
@@ -95,7 +167,7 @@ class App(tk.Tk):
                     self.save_path_var.set(path)
                 else:
                     self.save_path_var.set(os.path.join(os.path.expanduser("~"), "Downloads"))
-        except (FileNotFoundError, json.JSONDecodeError):
+        except:
             self.save_path_var.set(os.path.join(os.path.expanduser("~"), "Downloads"))
 
     def save_config(self):
@@ -107,28 +179,35 @@ class App(tk.Tk):
         path = filedialog.askdirectory(initialdir=self.save_path_var.get())
         if path:
             self.save_path_var.set(path)
-            self.log(f"Save directory set to: {path}")
+            self.log(f"Save directory: {path}")
 
     def log(self, message):
         self.output_text.insert(tk.END, message.strip() + "\n")
         self.output_text.see(tk.END)
 
     def start_analysis(self):
-        # ... (same as before)
+        url = self.url_var.get().strip()
+        if not url: return
+        if self.output_format.get() == "ig_photo":
+            return
+            
+        self.last_analyzed_url = url
         self.analyze_button["state"] = "disabled"
         self.download_button["state"] = "disabled"
-        self.log("Starting analysis...")
+        self.log("Auto-analyzing...")
         threading.Thread(target=self.analyze_url, daemon=True).start()
 
     def analyze_url(self):
-        # ... (same as before, just ensuring title is set)
         url = self.url_entry.get()
         if not url:
-            messagebox.showerror("Error", "Please enter a URL.")
             self.analyze_button["state"] = "normal"
             return
+        
+        if "threads.com" in url:
+            url = url.replace("threads.com", "threads.net")
+            self.url_var.set(url) # Update variable instead of widget directly
+
         try:
-            # Hide console window on Windows
             si = None
             if sys.platform == "win32":
                 si = subprocess.STARTUPINFO()
@@ -136,21 +215,13 @@ class App(tk.Tk):
                 si.wShowWindow = subprocess.SW_HIDE
 
             command = [self.yt_dlp_path, "--dump-json", url, "--js-runtimes", "node", "--playlist-items", "1"]
-            process = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', check=False, startupinfo=si, errors='replace') # check=False to handle warnings
+            process = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', check=False, startupinfo=si, errors='replace') 
 
-            if process.returncode != 0:
-                self.log(f"yt-dlp exited with warnings or errors (Code: {process.returncode}):")
-                self.log(process.stderr)
-                # Still try to parse stdout, as it might contain partial info
-            
             if not process.stdout.strip():
-                raise Exception("No data received from yt-dlp analysis.")
+                raise Exception("No data received. URL might be private or invalid.")
 
-            # Parse only the first line to handle potential multi-JSON output (e.g. playlists) safely
-            first_line = process.stdout.strip().split('\n')[0]
-            info = json.loads(first_line)
-            
-            self.winfo_toplevel().title(info.get('title', 'YouTube Downloader'))
+            info = json.loads(process.stdout.strip().split('\n')[0])
+            self.winfo_toplevel().title(info.get('title', 'Video Downloader'))
             formats = info.get("formats", [])
             self.video_formats.clear()
             self.audio_formats.clear()
@@ -158,121 +229,127 @@ class App(tk.Tk):
             for f in formats:
                 filesize = f.get('filesize') or f.get('filesize_approx')
                 size_mb = f"~{filesize / (1024*1024):.1f}MB" if filesize else "N/A"
-                
                 if f.get('vcodec') != 'none' and f.get('acodec') == 'none':
                     desc = f"{f.get('height', 'N/A')}p ({f.get('ext')}, {f.get('vcodec')}) - {size_mb}"
                     self.video_formats.append((desc, f['format_id']))
                 elif f.get('acodec') != 'none' and f.get('vcodec') == 'none':
                     desc = f"{f.get('abr', 0)}k ({f.get('ext')}, {f.get('acodec')}) - {size_mb}"
                     self.audio_formats.append((desc, f['format_id']))
+                elif f.get('vcodec') != 'none' and f.get('acodec') != 'none':
+                    desc = f"Container: {f.get('height', 'N/A')}p ({f.get('ext')}) - {size_mb}"
+                    self.video_formats.append((desc, f['format_id']))
 
             self.video_format_combo['values'] = [v[0] for v in self.video_formats]
             self.audio_format_combo['values'] = [a[0] for a in self.audio_formats]
             if self.video_formats: self.video_format_combo.set(self.video_formats[-1][0])
             if self.audio_formats: self.audio_format_combo.set(self.audio_formats[-1][0])
-            
-            self.log(f"Analysis complete for: {info.get('title', 'Unknown title')}")
+            self.log(f"Analysis complete: {info.get('title', 'Unknown')}")
             self.download_button["state"] = "normal"
         except Exception as e:
-            self.log(f"An unexpected error occurred during analysis: {e}")
-            messagebox.showerror("Error", f"An unexpected error occurred during analysis: {e}")
+            self.log(f"Analysis error: {e}")
+            # messagebox.showerror("Error", f"Analysis error: {e}") # Suppress popup for auto-analysis to avoid annoyance
         finally:
             self.analyze_button["state"] = "normal"
 
-    def reset_ui(self):
-        """Resets the UI elements to their initial state."""
-        self.url_entry.delete(0, tk.END)
-        self.video_format_combo.set('')
-        self.video_format_combo['values'] = []
-        self.audio_format_combo.set('')
-        self.audio_format_combo['values'] = []
-        self.progress_var.set(0)
-        self.video_formats = []
-        self.audio_formats = []
-        self.log("Ready for next download.")
+    def download_content(self):
+        mode = self.output_format.get()
+        if mode == "ig_photo":
+            threading.Thread(target=self.download_ig_photo, daemon=True).start()
+        else:
+            self.download_video()
+
+    def download_ig_photo(self):
+        url = self.url_entry.get()
+        save_dir = self.save_path_var.get()
+        if not save_dir:
+            messagebox.showerror("Error", "Select a save directory.")
+            return
+
+        self.log("Starting IG Photo download...")
+        self.download_button["state"] = "disabled"
+        self.analyze_button["state"] = "disabled"
+        self.progress_var.set(10)
+
+        try:
+            L = instaloader.Instaloader(
+                download_pictures=True, download_videos=False, 
+                download_video_thumbnails=False, download_geotags=False, 
+                download_comments=False, save_metadata=False, compress_json=False
+            )
+            match = re.search(r"instagram\.com/(?:p|reel)/([^/?#&]+)", url)
+            if not match:
+                raise ValueError("Could not extract shortcode.")
+            
+            shortcode = match.group(1)
+            self.log(f"Shortcode: {shortcode}")
+            post = instaloader.Post.from_shortcode(L.context, shortcode)
+            
+            original_cwd = os.getcwd()
+            try:
+                os.chdir(save_dir)
+                self.log(f"Downloading to: {os.path.join(save_dir, shortcode)}")
+                L.download_post(post, target=shortcode)
+            finally:
+                os.chdir(original_cwd)
+            
+            self.progress_var.set(100)
+            self.log("Download complete!")
+            messagebox.showinfo("Success", f"Photos saved to folder:\n{os.path.join(save_dir, shortcode)}")
+            self.after_idle(self.reset_ui)
+        except Exception as e:
+            self.log(f"Error: {e}")
+            messagebox.showerror("Error", f"Failed: {e}")
+            self.progress_var.set(0)
+        finally:
+            self.download_button["state"] = "normal"
+            self.on_mode_change()
 
     def download_video(self):
         url = self.url_entry.get()
-        if not url:
-            messagebox.showerror("Error", "Please enter a URL.")
-            return
-
         output_format = self.output_format.get()
         is_mp3 = output_format == 'mp3'
-        
-        # User requested "change to download single video", so we prioritize single video mode.
-        # We will strictly enforce --no-playlist to avoid accidental bulk downloads.
-        is_playlist = False 
-
-        video_id = None
-        audio_id = None
-        
-        # Get selected format IDs
         video_desc = self.video_format_combo.get()
         audio_desc = self.audio_format_combo.get()
 
-        # If not MP3, we need video format. If MP3, we only strictly need audio.
         if not is_mp3:
-            if not video_desc or not audio_desc:
-                messagebox.showerror("Error", "Please analyze a URL and select formats first.")
-                return
-            video_id = next((v[1] for v in self.video_formats if v[0] == video_desc), None)
+            if not video_desc and not audio_desc:
+                 if self.video_formats: video_id = self.video_formats[-1][1]
+                 else: messagebox.showerror("Error", "Analyze URL first."); return
+            if video_desc: video_id = next((v[1] for v in self.video_formats if v[0] == video_desc), None)
 
-        # Always try to get audio ID if selected
-        if audio_desc:
-            audio_id = next((a[1] for a in self.audio_formats if a[0] == audio_desc), None)
+        if audio_desc: audio_id = next((a[1] for a in self.audio_formats if a[0] == audio_desc), None)
 
-        if not is_mp3 and (not video_id or not audio_id):
-            messagebox.showerror("Error", "Could not find the selected format IDs. Please re-analyze.")
-            return
-
-        # Sanitize title for use as a filename
         title = self.winfo_toplevel().title()
         sanitized_title = "".join(c for c in title if c.isalnum() or c in (' ', '.', '_')).rstrip()
-        initial_filename = f"{sanitized_title}.{output_format}"
-        
         save_path = filedialog.asksaveasfilename(
             initialdir=self.save_path_var.get(),
-            initialfile=initial_filename,
+            initialfile=f"{sanitized_title}.{output_format}",
             defaultextension=f".{output_format}",
             filetypes=[(f"{output_format.upper()} Files", f"*.{output_format}"), ("All Files", "*.*")]
         )
 
-        if not save_path:
-            self.log("Download cancelled by user.")
-            return
+        if not save_path: return
 
         command = [self.yt_dlp_path]
-
         if is_mp3:
-             # Audio Only Logic
-            if audio_id:
-                command.extend(["-f", audio_id])
-            else:
-                command.extend(["-f", "ba/b"]) # Best audio
-            
-            command.append("-x") # Extract audio
-            command.extend(["--audio-format", "mp3"])
+            if audio_id: command.extend(["-f", audio_id])
+            else: command.extend(["-f", "ba/b"])
+            command.extend(["-x", "--audio-format", "mp3"])
         else:
-            # Video + Audio Logic
-            command.extend(["-f", f"{video_id}+{audio_id}"])
-            command.extend(["--merge-output-format", output_format])
+            if video_id and audio_id: command.extend(["-f", f"{video_id}+{audio_id}"])
+            elif video_id: command.extend(["-f", f"{video_id}"])
+            if output_format in ['mp4', 'mkv']: command.extend(["--merge-output-format", output_format])
 
         command.extend([
-            "--ffmpeg-location", self.ffmpeg_path,
-            "-o", save_path, 
-            url,
-            "--progress",
-            "--newline",
-            "--js-runtimes", "node",
-            "--no-playlist" # Force single video download
+            "--ffmpeg-location", self.ffmpeg_path, "-o", save_path, 
+            url, "--progress", "--newline", "--js-runtimes", "node", "--no-playlist"
         ])
-
+        
         self.progress_var.set(0)
         self.download_button["state"] = "disabled"
         self.analyze_button["state"] = "disabled"
         self.browse_button["state"] = "disabled"
-        self.log(f"Starting download to {save_path}...")
+        self.log(f"Starting download...")
         threading.Thread(target=self.run_download_process, args=(command,), daemon=True).start()
 
     def run_download_process(self, command):
@@ -282,40 +359,27 @@ class App(tk.Tk):
                 si = subprocess.STARTUPINFO()
                 si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                 si.wShowWindow = subprocess.SW_HIDE
-
             process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace', startupinfo=si)
-            
-            # Regex to capture yt-dlp's progress percentage
-            progress_regex = re.compile(r"\[download\]\s+([0-9.]+)%")
-
+            progress_regex = re.compile(r"[download]\s+([0-9.]+)%\s+of\s+.* at .* ETA ")
             for line in iter(process.stdout.readline, ''):
                 self.log(line)
                 match = progress_regex.search(line)
-                if match:
-                    percentage = float(match.group(1))
-                    # Schedule GUI update from the main thread
-                    self.after_idle(self.progress_var.set, percentage)
-            
+                if match: self.after_idle(self.progress_var.set, float(match.group(1)))
             process.stdout.close()
-            return_code = process.wait()
-
-            if return_code == 0:
+            if process.wait() == 0:
                 self.after_idle(self.progress_var.set, 100)
-                self.log("Download completed successfully!")
-                messagebox.showinfo("Success", f"Download complete!\nFile saved to: {command[command.index('-o') + 1]}")
-                # Reset UI after successful download
+                messagebox.showinfo("Success", "Download complete!")
                 self.after_idle(self.reset_ui)
             else:
                 self.after_idle(self.progress_var.set, 0)
-                self.log(f"Download failed with return code: {return_code}")
-                messagebox.showerror("Download Failed", "The download process failed. Check the log.")
+                messagebox.showerror("Error", "Download failed.")
         except Exception as e:
-            self.log(f"An unexpected error occurred: {e}")
-            messagebox.showerror("Error", f"An unexpected error occurred: {e}")
+            self.log(f"Error: {e}")
         finally:
             self.download_button["state"] = "normal"
             self.analyze_button["state"] = "normal"
             self.browse_button["state"] = "normal"
+            self.on_mode_change()
 
 if __name__ == "__main__":
     app = App()
