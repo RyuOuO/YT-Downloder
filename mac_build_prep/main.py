@@ -364,21 +364,29 @@ class App(tk.Tk):
             if self.video_formats: self.video_format_combo.set(self.video_formats[-1][0])
             if self.audio_formats: self.audio_format_combo.set(self.audio_formats[-1][0])
             
-            # Subtitles
+            # --- Dynamic Subtitle Parsing ---
             subs = info.get('subtitles', {})
             auto_subs = info.get('automatic_captions', {})
-            available_subs = []
+            
+            manual_subs_list = []
+            auto_subs_list = []
             seen_langs = set()
-            def add_subs(source, prefix=""):
+
+            def process_subs(source, target_list, tag):
                 for lang_code, sub_list in source.items():
-                    if lang_code not in seen_langs:
-                        name = sub_list[0].get('name', lang_code)
-                        label = f"{lang_code} - {name} {prefix}"
-                        available_subs.append(label)
-                        seen_langs.add(lang_code)
-            add_subs(subs, "(Manual)")
-            add_subs(auto_subs, "(Auto)")
-            available_subs.sort()
+                    # Get readable name
+                    name = sub_list[0].get('name', lang_code)
+                    label = f"[{tag}] {lang_code} - {name}"
+                    target_list.append(label)
+
+            process_subs(subs, manual_subs_list, "Manual")
+            process_subs(auto_subs, auto_subs_list, "Auto")
+            
+            manual_subs_list.sort()
+            auto_subs_list.sort()
+            
+            # Combine: Manual first, then Auto
+            available_subs = manual_subs_list + auto_subs_list
 
             if available_subs:
                 self.sub_lang_combo['values'] = available_subs
@@ -478,11 +486,22 @@ class App(tk.Tk):
             elif video_id: command.extend(["-f", f"{video_id}"])
             if output_format in ['mp4', 'mkv']: command.extend(["--merge-output-format", output_format])
 
+        # Embed Subs logic
         if self.embed_subs_var.get():
             full_text = self.sub_lang_combo.get()
-            if full_text and " - " in full_text:
-                lang_code = full_text.split(" - ")[0]
-                command.extend(["--write-subs", "--write-auto-subs", "--embed-subs", "--sub-langs", lang_code])
+            # Format: "[Manual] en - English" or "[Auto] en - English"
+            # We need to extract 'en'
+            if " - " in full_text:
+                try:
+                    # Split by " - " to get "[Tag] code" part
+                    prefix_part = full_text.split(" - ")[0]
+                    # Split by space to get "code" (it's the last element)
+                    lang_code = prefix_part.split(" ")[-1]
+                    
+                    command.extend(["--write-subs", "--write-auto-subs", "--embed-subs", "--sub-langs", lang_code])
+                except:
+                    # Fallback
+                    command.extend(["--write-subs", "--write-auto-subs", "--embed-subs", "--sub-langs", "all,-live_chat"])
             else:
                 command.extend(["--write-subs", "--write-auto-subs", "--embed-subs", "--sub-langs", "all,-live_chat"])
 
