@@ -12,7 +12,7 @@ import webbrowser
 from PIL import Image, ImageTk
 from io import BytesIO
 
-CURRENT_VERSION = "v1.2.1"
+CURRENT_VERSION = "v1.2.2"
 GITHUB_REPO = "RyuOuO/YT-Downloder"
 
 class App(tk.Tk):
@@ -374,8 +374,8 @@ class App(tk.Tk):
 
             def process_subs(source, target_list, tag):
                 for lang_code, sub_list in source.items():
-                    # Get readable name
                     name = sub_list[0].get('name', lang_code)
+                    # Don't dedupe here, as same lang might be in both manual and auto
                     label = f"[{tag}] {lang_code} - {name}"
                     target_list.append(label)
 
@@ -385,7 +385,6 @@ class App(tk.Tk):
             manual_subs_list.sort()
             auto_subs_list.sort()
             
-            # Combine: Manual first, then Auto
             available_subs = manual_subs_list + auto_subs_list
 
             if available_subs:
@@ -486,21 +485,14 @@ class App(tk.Tk):
             elif video_id: command.extend(["-f", f"{video_id}"])
             if output_format in ['mp4', 'mkv']: command.extend(["--merge-output-format", output_format])
 
-        # Embed Subs logic
         if self.embed_subs_var.get():
             full_text = self.sub_lang_combo.get()
-            # Format: "[Manual] en - English" or "[Auto] en - English"
-            # We need to extract 'en'
             if " - " in full_text:
                 try:
-                    # Split by " - " to get "[Tag] code" part
                     prefix_part = full_text.split(" - ")[0]
-                    # Split by space to get "code" (it's the last element)
                     lang_code = prefix_part.split(" ")[-1]
-                    
                     command.extend(["--write-subs", "--write-auto-subs", "--embed-subs", "--sub-langs", lang_code])
                 except:
-                    # Fallback
                     command.extend(["--write-subs", "--write-auto-subs", "--embed-subs", "--sub-langs", "all,-live_chat"])
             else:
                 command.extend(["--write-subs", "--write-auto-subs", "--embed-subs", "--sub-langs", "all,-live_chat"])
@@ -524,7 +516,7 @@ class App(tk.Tk):
                 si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                 si.wShowWindow = subprocess.SW_HIDE
             process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace', startupinfo=si)
-            progress_regex = re.compile(r"[download]\s+([0-9.]+)%")
+            progress_regex = re.compile(r"[download]\s+([0-9.]+)%\s*")
             for line in iter(process.stdout.readline, ''):
                 self.log(line)
                 match = progress_regex.search(line)
