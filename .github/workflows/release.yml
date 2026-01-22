@@ -66,7 +66,7 @@ jobs:
 
       - name: Build PKG
         run: |
-          pyinstaller --name "YouTubeDownloader" --onefile --windowed --add-data "bin:bin" --hidden-import=PIL --hidden-import=PIL._tkinter_finder --hidden-import=PIL.Image --hidden-import=PIL.ImageTk src/main.py
+          python -m PyInstaller --name "YouTubeDownloader" --onefile --windowed --add-data "bin:bin" --hidden-import=PIL --hidden-import=PIL._tkinter_finder --hidden-import=PIL.Image --hidden-import=PIL.ImageTk src/main.py
           pkgbuild --install-location /Applications --component "dist/YouTubeDownloader.app" "dist/YouTubeDownloader.pkg"
 
       - name: Upload Artifact

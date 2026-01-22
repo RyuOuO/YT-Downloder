@@ -47,7 +47,7 @@ xattr -d com.apple.quarantine bin/ffmpeg 2>/dev/null
 echo "正在打包應用程式 (.app)..."
 # 清理舊的 build
 rm -rf build dist *.spec
-pyinstaller --name "YouTubeDownloader" --onefile --windowed --add-data "bin:bin" --hidden-import=PIL --hidden-import=PIL._tkinter_finder --hidden-import=PIL.Image --hidden-import=PIL.ImageTk main.py
+python -m PyInstaller --name "YouTubeDownloader" --onefile --windowed --add-data "bin:bin" --hidden-import=PIL --hidden-import=PIL._tkinter_finder --hidden-import=PIL.Image --hidden-import=PIL.ImageTk main.py
 
 # 7. 製作 .pkg 安裝檔
 echo "------------------------------------------"
