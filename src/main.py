@@ -9,31 +9,31 @@ import re
 import instaloader
 import urllib.request
 import webbrowser
+from PIL import Image, ImageTk
+from io import BytesIO
 
-CURRENT_VERSION = "v1.1.0"
+CURRENT_VERSION = "v1.2.0"
 GITHUB_REPO = "RyuOuO/YT-Downloder"
 
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title(f"Universal Video & IG Photo Downloader ({CURRENT_VERSION})")
-        self.geometry("850x750")
+        self.geometry("900x850")
         
-        # --- High DPI Support (macOS & Windows) ---
+        # --- High DPI Support ---
         try:
-            # Windows
             from ctypes import windll
             windll.shcore.SetProcessDpiAwareness(1)
         except:
             pass
 
-        # --- Auto-Update Check ---
-        self.after(1000, self.check_for_updates)
-
-        # --- Performance Optimization: Log Buffering ---
-        self.log_queue = []
-        self.is_log_updating = False
-        self.update_log_interval = 100 # ms
+        # --- Theme Config ---
+        self.dark_mode = False
+        self.colors = {
+            "light": {"bg": "#f0f0f0", "fg": "black", "entry_bg": "white", "text_bg": "white"},
+            "dark": {"bg": "#2d2d2d", "fg": "white", "entry_bg": "#404040", "text_bg": "#404040"}
+        }
 
         # --- Paths & Config ---
         if getattr(sys, 'frozen', False):
@@ -49,31 +49,70 @@ class App(tk.Tk):
 
         self.grid_columnconfigure(0, weight=1)
 
-        # --- UI Elements ---
+        # --- UI Construction ---
+        self.create_widgets()
+        
+        # --- State ---
+        self.video_formats = []
+        self.audio_formats = []
+        self.last_analyzed_url = ""
+        self.analysis_timer = None
+        self.thumbnail_image = None # Keep reference
+        
+        # --- Init ---
+        self.load_config()
+        self.apply_theme()
+        self.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self.after(1000, self.check_for_updates)
+        self.bind("<FocusIn>", self.check_clipboard)
+
+        # Log buffering
+        self.log_queue = []
+        self.is_log_updating = False
+        self.update_log_interval = 100
+
+    def create_widgets(self):
+        # Top Frame: Inputs & Buttons
         top_frame = ttk.Frame(self)
         top_frame.grid(row=0, column=0, columnspan=2, padx=10, pady=5, sticky="ew")
         top_frame.grid_columnconfigure(0, weight=1)
 
-        # URL Input
         ttk.Label(top_frame, text="Video/Photo URL:").grid(row=0, column=0, sticky="w")
         self.url_var = tk.StringVar()
         self.url_var.trace("w", self.on_url_change)
         self.url_entry = ttk.Entry(top_frame, textvariable=self.url_var)
         self.url_entry.grid(row=1, column=0, sticky="ew")
-        self.analyze_button = ttk.Button(top_frame, text="Analyze URL (Video Only)", command=self.start_analysis)
-        self.analyze_button.grid(row=1, column=1, padx=(5, 0))
         
+        btn_frame = ttk.Frame(top_frame)
+        btn_frame.grid(row=1, column=1, padx=5)
+        self.analyze_button = ttk.Button(btn_frame, text="Analyze", command=self.start_analysis)
+        self.analyze_button.pack(side="left")
+        self.theme_btn = ttk.Button(btn_frame, text="☀/🌙", width=5, command=self.toggle_theme)
+        self.theme_btn.pack(side="left", padx=5)
+
+        # Options
+        opts_frame = ttk.Frame(top_frame)
+        opts_frame.grid(row=2, column=0, columnspan=2, sticky="w", pady=5)
+        
+        self.embed_subs_var = tk.BooleanVar(value=False)
+        self.subs_check = ttk.Checkbutton(opts_frame, text="Embed Subtitles (YouTube)", variable=self.embed_subs_var)
+        self.subs_check.pack(side="left", padx=5)
+
         # Save Directory
-        ttk.Label(top_frame, text="Save to:").grid(row=2, column=0, sticky="w", pady=(10, 0))
+        ttk.Label(top_frame, text="Save to:").grid(row=3, column=0, sticky="w", pady=(5, 0))
         self.save_path_var = tk.StringVar()
         save_entry = ttk.Entry(top_frame, textvariable=self.save_path_var, state="readonly")
-        save_entry.grid(row=3, column=0, sticky="ew")
+        save_entry.grid(row=4, column=0, sticky="ew")
         self.browse_button = ttk.Button(top_frame, text="Browse...", command=self.select_save_directory)
-        self.browse_button.grid(row=3, column=1, padx=(5, 0))
+        self.browse_button.grid(row=4, column=1, padx=(5, 0))
+
+        # Thumbnail Area
+        self.thumb_label = ttk.Label(self, text="No Thumbnail", anchor="center")
+        self.thumb_label.grid(row=1, column=0, columnspan=2, pady=10)
 
         # Format Selection
         formats_frame = ttk.LabelFrame(self, text="Format Selection")
-        formats_frame.grid(row=1, column=0, columnspan=2, padx=10, pady=10, sticky="ew")
+        formats_frame.grid(row=2, column=0, columnspan=2, padx=10, pady=5, sticky="ew")
         formats_frame.grid_columnconfigure(1, weight=1)
         
         ttk.Label(formats_frame, text="Video Quality:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
@@ -86,70 +125,86 @@ class App(tk.Tk):
         
         ttk.Label(formats_frame, text="Mode:").grid(row=2, column=0, padx=5, pady=5, sticky="w")
         self.output_format = tk.StringVar(value="mp4")
+        self.output_format.trace("w", self.on_mode_change)
         
         radio_frame = ttk.Frame(formats_frame)
         radio_frame.grid(row=2, column=1, sticky="w")
-        
-        ttk.Radiobutton(radio_frame, text="Video (MP4)", variable=self.output_format, value="mp4").pack(side="left", padx=5)
-        ttk.Radiobutton(radio_frame, text="Video (MKV)", variable=self.output_format, value="mkv").pack(side="left", padx=5)
+        ttk.Radiobutton(radio_frame, text="MP4", variable=self.output_format, value="mp4").pack(side="left", padx=5)
+        ttk.Radiobutton(radio_frame, text="MKV", variable=self.output_format, value="mkv").pack(side="left", padx=5)
         ttk.Radiobutton(radio_frame, text="Audio (MP3)", variable=self.output_format, value="mp3").pack(side="left", padx=5)
         ttk.Radiobutton(radio_frame, text="IG Photo", variable=self.output_format, value="ig_photo").pack(side="left", padx=5)
 
-        # Download & Output
+        # Download Button
         self.download_button = ttk.Button(self, text="Download", command=self.download_content, state="disabled")
-        self.download_button.grid(row=2, column=0, columnspan=2, pady=5)
+        self.download_button.grid(row=3, column=0, columnspan=2, pady=10)
         
+        # Progress & Log
         self.progress_var = tk.DoubleVar()
         self.progressbar = ttk.Progressbar(self, variable=self.progress_var, maximum=100)
-        self.progressbar.grid(row=3, column=0, columnspan=2, padx=10, pady=5, sticky="ew")
+        self.progressbar.grid(row=4, column=0, columnspan=2, padx=10, pady=5, sticky="ew")
 
-        self.output_text = scrolledtext.ScrolledText(self, wrap=tk.WORD, height=15)
-        self.output_text.grid(row=4, column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
-        self.grid_rowconfigure(4, weight=1)
-        
-        self.video_formats = []
-        self.audio_formats = []
-        self.last_analyzed_url = ""
-        self.analysis_timer = None
-        
-        self.load_config()
-        self.protocol("WM_DELETE_WINDOW", self.on_closing)
-        self.output_format.trace("w", self.on_mode_change)
-        
-        # Clipboard check on focus
-        self.bind("<FocusIn>", self.check_clipboard)
+        self.output_text = scrolledtext.ScrolledText(self, wrap=tk.WORD, height=12)
+        self.output_text.grid(row=5, column=0, columnspan=2, padx=10, pady=5, sticky="nsew")
+        self.grid_rowconfigure(5, weight=1)
 
+    # --- Theme Logic ---
+    def toggle_theme(self):
+        self.dark_mode = not self.dark_mode
+        self.apply_theme()
+
+    def apply_theme(self):
+        theme = "dark" if self.dark_mode else "light"
+        c = self.colors[theme]
+        
+        self.configure(bg=c["bg"])
+        style = ttk.Style()
+        style.configure("TFrame", background=c["bg"])
+        style.configure("TLabel", background=c["bg"], foreground=c["fg"])
+        style.configure("TLabelframe", background=c["bg"], foreground=c["fg"])
+        style.configure("TLabelframe.Label", background=c["bg"], foreground=c["fg"])
+        style.configure("TRadiobutton", background=c["bg"], foreground=c["fg"])
+        style.configure("TCheckbutton", background=c["bg"], foreground=c["fg"])
+        
+        self.output_text.configure(bg=c["text_bg"], fg=c["fg"], insertbackground=c["fg"])
+        self.url_entry.configure(background=c["entry_bg"])
+
+    # --- Core Logic ---
+    def load_thumbnail(self, url):
+        try:
+            with urllib.request.urlopen(url) as u:
+                raw_data = u.read()
+            image = Image.open(BytesIO(raw_data))
+            # Resize
+            image.thumbnail((320, 180)) # 16:9 aspect ratio
+            self.thumbnail_image = ImageTk.PhotoImage(image)
+            self.thumb_label.configure(image=self.thumbnail_image, text="")
+        except Exception as e:
+            self.log(f"Failed to load thumbnail: {e}")
+            self.thumb_label.configure(image='', text="(No Thumbnail)")
+
+    # ... (Keep previous utility methods: check_clipboard, on_url_change, etc.)
     def check_clipboard(self, event=None):
         try:
             content = self.clipboard_get()
-            # Simple check if it looks like a URL and is different from current
-            if content.startswith("http") and content != self.url_var.get():
+            if (content.startswith("http") and 
+                content != self.url_var.get() and 
+                content != self.last_analyzed_url):
                 self.url_var.set(content)
-                self.log(f"Auto-pasted from clipboard: {content}")
-        except:
-            pass
+                self.log(f"Pasted: {content}")
+        except: pass
 
     def on_url_change(self, *args):
-        """Auto-detects mode and triggers analysis."""
         url = self.url_var.get().strip()
         if not url: return
+        if self.analysis_timer: self.after_cancel(self.analysis_timer)
 
-        # Cancel any pending analysis
-        if self.analysis_timer:
-            self.after_cancel(self.analysis_timer)
-
-        # Mode switching logic
         if "instagram.com/p/" in url or "instagram.com/reel/" in url:
             if self.output_format.get() != "ig_photo":
                 self.output_format.set("ig_photo")
-                self.log("Auto-switched to IG Photo mode.")
         else:
-            # Switch back to Video mode if currently in IG Photo mode
             if self.output_format.get() == "ig_photo":
                 self.output_format.set("mp4")
-                self.log("Auto-switched to Video mode.")
             
-            # Debounce auto-analysis: wait 800ms after user stops typing/pasting
             if url != self.last_analyzed_url:
                 self.analysis_timer = self.after(800, self.start_analysis)
 
@@ -157,32 +212,30 @@ class App(tk.Tk):
         if self.output_format.get() == "ig_photo":
             self.download_button["state"] = "normal"
             self.analyze_button["state"] = "disabled"
+            self.subs_check["state"] = "disabled"
         else:
             if not self.video_formats and not self.audio_formats:
                 self.download_button["state"] = "disabled"
             self.analyze_button["state"] = "normal"
+            self.subs_check["state"] = "normal"
 
-    def on_closing(self):
-        try:
-            self.save_config()
-        except:
-            pass
-        self.destroy()
-        # Force exit to ensure all threads are killed, especially on macOS
-        sys.exit(0)
+    # ... (Keep log, save/load config logic)
+    def log(self, message):
+        self.log_queue.append(message.strip())
+        if not self.is_log_updating:
+            self.is_log_updating = True
+            self.after(self.update_log_interval, self.process_log_queue)
 
-    def reset_ui(self):
-        self.url_entry.delete(0, tk.END)
-        self.video_format_combo.set('')
-        self.video_format_combo['values'] = []
-        self.audio_format_combo.set('')
-        self.audio_format_combo['values'] = []
-        self.progress_var.set(0)
-        self.video_formats = []
-        self.audio_formats = []
-        self.last_analyzed_url = ""
-        self.log("Ready.")
-        self.on_mode_change()
+    def process_log_queue(self):
+        if self.log_queue:
+            messages = "\n".join(self.log_queue)
+            self.log_queue = []
+            self.output_text.insert(tk.END, messages + "\n")
+            self.output_text.see(tk.END)
+        self.is_log_updating = False
+        if self.log_queue:
+             self.is_log_updating = True
+             self.after(self.update_log_interval, self.process_log_queue)
 
     def load_config(self):
         try:
@@ -193,87 +246,63 @@ class App(tk.Tk):
                     self.save_path_var.set(path)
                 else:
                     self.save_path_var.set(os.path.join(os.path.expanduser("~"), "Downloads"))
+                
+                self.dark_mode = config.get("dark_mode", False)
+                self.embed_subs_var.set(config.get("embed_subs", False))
         except:
             self.save_path_var.set(os.path.join(os.path.expanduser("~"), "Downloads"))
 
     def save_config(self):
-        config = {"save_path": self.save_path_var.get()}
+        config = {
+            "save_path": self.save_path_var.get(),
+            "dark_mode": self.dark_mode,
+            "embed_subs": self.embed_subs_var.get()
+        }
         with open(self.config_path, "w") as f:
             json.dump(config, f)
-            
+
     def select_save_directory(self):
         path = filedialog.askdirectory(initialdir=self.save_path_var.get())
         if path:
             self.save_path_var.set(path)
             self.log(f"Save directory: {path}")
 
+    def on_closing(self):
+        self.save_config()
+        self.destroy()
+        sys.exit(0)
+
+    # --- Update Check ---
     def check_for_updates(self):
-        """Checks GitHub for the latest release."""
         def _check():
             try:
                 url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
                 with urllib.request.urlopen(url) as response:
                     data = json.loads(response.read().decode())
                     latest_version = data.get("tag_name", "")
-                    
-                    # Simple string comparison (assumes vX.Y.Z format)
                     if latest_version and latest_version != CURRENT_VERSION:
-                        # If latest is v1.2.0 and current is v1.1.0, prompt
-                        # (Ideally use semver, but string compare works if format is consistent)
-                        if self.is_newer(latest_version, CURRENT_VERSION):
+                        # Basic version compare
+                        v1 = [int(x) for x in latest_version.lstrip('v').split('.')]
+                        v2 = [int(x) for x in CURRENT_VERSION.lstrip('v').split('.')]
+                        if v1 > v2:
                             self.after_idle(lambda: self.prompt_update(latest_version, data.get("html_url")))
-            except Exception as e:
-                print(f"Update check failed: {e}")
-
+            except: pass
         threading.Thread(target=_check, daemon=True).start()
 
-    def is_newer(self, v1, v2):
-        """Returns True if v1 > v2. Handles 'v' prefix."""
-        def parse(v):
-            return [int(x) for x in v.lstrip('v').split('.')]
-        try:
-            return parse(v1) > parse(v2)
-        except:
-            return False
-
     def prompt_update(self, version, url):
-        if messagebox.askyesno("Update Available", f"A new version ({version}) is available!\nDo you want to download it now?"):
+        if messagebox.askyesno("Update Available", f"New version {version} available!\nDownload now?"):
             webbrowser.open(url)
 
-    def log(self, message):
-        """Buffers log messages to prevent UI freezing."""
-        self.log_queue.append(message.strip())
-        if not self.is_log_updating:
-            self.is_log_updating = True
-            self.after(self.update_log_interval, self.process_log_queue)
-
-    def process_log_queue(self):
-        """Updates the UI with buffered messages."""
-        if self.log_queue:
-            # Batch insert
-            messages = "\n".join(self.log_queue)
-            self.log_queue = [] # Clear buffer
-            
-            self.output_text.insert(tk.END, messages + "\n")
-            self.output_text.see(tk.END)
-        
-        # Keep checking if there are more messages coming in (if process still running)
-        # But if queue is empty, we can stop the loop until next log call to save CPU
-        self.is_log_updating = False
-        if self.log_queue: # If new messages arrived while processing
-             self.is_log_updating = True
-             self.after(self.update_log_interval, self.process_log_queue)
-
+    # --- Analysis & Download ---
     def start_analysis(self):
-        url = self.url_var.get().strip()
-        if not url: return
-        if self.output_format.get() == "ig_photo":
-            return
-            
-        self.last_analyzed_url = url
+        if self.output_format.get() == "ig_photo": return
         self.analyze_button["state"] = "disabled"
         self.download_button["state"] = "disabled"
         self.log("Auto-analyzing...")
+        
+        # Clear thumbnail
+        self.thumb_label.configure(image='', text="Loading...")
+        
         threading.Thread(target=self.analyze_url, daemon=True).start()
 
     def analyze_url(self):
@@ -284,7 +313,7 @@ class App(tk.Tk):
         
         if "threads.com" in url:
             url = url.replace("threads.com", "threads.net")
-            self.url_var.set(url) # Update variable instead of widget directly
+            self.url_var.set(url)
 
         try:
             si = None
@@ -297,10 +326,16 @@ class App(tk.Tk):
             process = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', check=False, startupinfo=si, errors='replace') 
 
             if not process.stdout.strip():
-                raise Exception("No data received. URL might be private or invalid.")
+                raise Exception("No data received.")
 
             info = json.loads(process.stdout.strip().split('\n')[0])
             self.winfo_toplevel().title(info.get('title', 'Video Downloader'))
+            
+            # Load Thumbnail
+            thumb_url = info.get('thumbnail')
+            if thumb_url:
+                self.after_idle(self.load_thumbnail, thumb_url)
+
             formats = info.get("formats", [])
             self.video_formats.clear()
             self.audio_formats.clear()
@@ -322,11 +357,12 @@ class App(tk.Tk):
             self.audio_format_combo['values'] = [a[0] for a in self.audio_formats]
             if self.video_formats: self.video_format_combo.set(self.video_formats[-1][0])
             if self.audio_formats: self.audio_format_combo.set(self.audio_formats[-1][0])
+            
             self.log(f"Analysis complete: {info.get('title', 'Unknown')}")
             self.download_button["state"] = "normal"
         except Exception as e:
             self.log(f"Analysis error: {e}")
-            # messagebox.showerror("Error", f"Analysis error: {e}") # Suppress popup for auto-analysis to avoid annoyance
+            self.thumb_label.configure(text="Error loading info")
         finally:
             self.analyze_button["state"] = "normal"
 
@@ -338,11 +374,10 @@ class App(tk.Tk):
             self.download_video()
 
     def download_ig_photo(self):
+        # ... (Existing IG Photo Logic - Same as before)
         url = self.url_entry.get()
         save_dir = self.save_path_var.get()
-        if not save_dir:
-            messagebox.showerror("Error", "Select a save directory.")
-            return
+        if not save_dir: messagebox.showerror("Error", "Select save dir."); return
 
         self.log("Starting IG Photo download...")
         self.download_button["state"] = "disabled"
@@ -356,34 +391,30 @@ class App(tk.Tk):
                 download_comments=False, save_metadata=False, compress_json=False
             )
             match = re.search(r"instagram\.com/(?:p|reel)/([^/?#&]+)", url)
-            if not match:
-                raise ValueError("Could not extract shortcode.")
-            
+            if not match: raise ValueError("No shortcode found.")
             shortcode = match.group(1)
-            self.log(f"Shortcode: {shortcode}")
-            post = instaloader.Post.from_shortcode(L.context, shortcode)
             
-            original_cwd = os.getcwd()
+            post = instaloader.Post.from_shortcode(L.context, shortcode)
+            cwd = os.getcwd()
             try:
                 os.chdir(save_dir)
-                self.log(f"Downloading to: {os.path.join(save_dir, shortcode)}")
                 L.download_post(post, target=shortcode)
             finally:
-                os.chdir(original_cwd)
+                os.chdir(cwd)
             
             self.progress_var.set(100)
-            self.log("Download complete!")
-            messagebox.showinfo("Success", f"Photos saved to folder:\n{os.path.join(save_dir, shortcode)}")
+            self.log("Complete!")
+            messagebox.showinfo("Success", f"Saved to {shortcode}")
             self.after_idle(self.reset_ui)
         except Exception as e:
             self.log(f"Error: {e}")
-            messagebox.showerror("Error", f"Failed: {e}")
-            self.progress_var.set(0)
+            messagebox.showerror("Error", f"{e}")
         finally:
             self.download_button["state"] = "normal"
             self.on_mode_change()
 
     def download_video(self):
+        # ... (Same logic but with Embed Subs support)
         url = self.url_entry.get()
         output_format = self.output_format.get()
         is_mp3 = output_format == 'mp3'
@@ -393,7 +424,7 @@ class App(tk.Tk):
         if not is_mp3:
             if not video_desc and not audio_desc:
                  if self.video_formats: video_id = self.video_formats[-1][1]
-                 else: messagebox.showerror("Error", "Analyze URL first."); return
+                 else: messagebox.showerror("Error", "Analyze first."); return
             if video_desc: video_id = next((v[1] for v in self.video_formats if v[0] == video_desc), None)
 
         if audio_desc: audio_id = next((a[1] for a in self.audio_formats if a[0] == audio_desc), None)
@@ -419,6 +450,10 @@ class App(tk.Tk):
             elif video_id: command.extend(["-f", f"{video_id}"])
             if output_format in ['mp4', 'mkv']: command.extend(["--merge-output-format", output_format])
 
+        # Embed Subs logic
+        if self.embed_subs_var.get():
+            command.extend(["--write-subs", "--embed-subs", "--sub-langs", "all,-live_chat"])
+
         command.extend([
             "--ffmpeg-location", self.ffmpeg_path, "-o", save_path, 
             url, "--progress", "--newline", "--js-runtimes", "node", "--no-playlist"
@@ -427,8 +462,7 @@ class App(tk.Tk):
         self.progress_var.set(0)
         self.download_button["state"] = "disabled"
         self.analyze_button["state"] = "disabled"
-        self.browse_button["state"] = "disabled"
-        self.log(f"Starting download...")
+        self.log("Downloading...")
         threading.Thread(target=self.run_download_process, args=(command,), daemon=True).start()
 
     def run_download_process(self, command):
@@ -439,7 +473,7 @@ class App(tk.Tk):
                 si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                 si.wShowWindow = subprocess.SW_HIDE
             process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace', startupinfo=si)
-            progress_regex = re.compile(r"[download]\s+([0-9.]+)%\s+of\s+.* at .* ETA ")
+            progress_regex = re.compile(r"[download]\s+([0-9.]+)%")
             for line in iter(process.stdout.readline, ''):
                 self.log(line)
                 match = progress_regex.search(line)
@@ -449,6 +483,7 @@ class App(tk.Tk):
                 self.after_idle(self.progress_var.set, 100)
                 messagebox.showinfo("Success", "Download complete!")
                 self.after_idle(self.reset_ui)
+                self.after_idle(lambda: self.thumb_label.configure(image='', text="No Thumbnail")) # Clear thumb
             else:
                 self.after_idle(self.progress_var.set, 0)
                 messagebox.showerror("Error", "Download failed.")
@@ -457,7 +492,6 @@ class App(tk.Tk):
         finally:
             self.download_button["state"] = "normal"
             self.analyze_button["state"] = "normal"
-            self.browse_button["state"] = "normal"
             self.on_mode_change()
 
 if __name__ == "__main__":
