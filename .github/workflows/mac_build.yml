@@ -3,7 +3,7 @@ name: Build macOS PKG
 on:
   push:
     branches: [ "main" ]
-  workflow_dispatch: # 允許手動點擊按鈕執行
+  workflow_dispatch:
 
 jobs:
   build:
@@ -23,7 +23,16 @@ jobs:
         python -m pip install pyinstaller instaloader certifi Pillow ttkbootstrap
 
     - name: 準備下載工具 (yt-dlp & ffmpeg)
-      # ... (skip) ...
+      run: |
+        mkdir -p bin
+        # 下載 yt-dlp
+        curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos -o bin/yt-dlp
+        chmod +x bin/yt-dlp
+        # 下載 ffmpeg
+        curl -L https://evermeet.cx/ffmpeg/getrelease/zip -o ffmpeg.zip
+        unzip -o -q ffmpeg.zip -d bin
+        rm ffmpeg.zip
+        chmod +x bin/ffmpeg
 
     - name: 執行 PyInstaller 打包
       run: |

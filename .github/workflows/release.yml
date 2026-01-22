@@ -3,7 +3,7 @@ name: Auto Release
 on:
   push:
     tags:
-      - 'v*' # Trigger on tags starting with v (e.g. v1.2.0)
+      - 'v*'
 
 jobs:
   build-windows:
@@ -19,9 +19,9 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install pyinstaller instaloader Pillow
+          pip install pyinstaller instaloader Pillow ttkbootstrap
 
-      - name: Download tools (yt-dlp & ffmpeg)
+      - name: Download tools
         run: |
           mkdir bin
           Invoke-WebRequest -Uri "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" -OutFile "bin/yt-dlp.exe"
@@ -55,7 +55,14 @@ jobs:
         run: |
           python -m pip install pyinstaller instaloader Pillow ttkbootstrap
 
-      # ... (skip download tools) ...
+      - name: Download tools
+        run: |
+          mkdir -p bin
+          curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos -o bin/yt-dlp
+          chmod +x bin/yt-dlp
+          curl -L https://evermeet.cx/ffmpeg/getrelease/zip -o ffmpeg.zip
+          unzip -o -q ffmpeg.zip -d bin
+          chmod +x bin/ffmpeg
 
       - name: Build PKG
         run: |
