@@ -22,12 +22,11 @@ class App(tk.Tk):
         self.geometry("900x850")
         
         # --- High DPI Support ---
-        if sys.platform == "win32":
-            try:
-                from ctypes import windll
-                windll.shcore.SetProcessDpiAwareness(1)
-            except:
-                pass
+        try:
+            from ctypes import windll
+            windll.shcore.SetProcessDpiAwareness(1)
+        except:
+            pass
 
         # --- Theme Config ---
         self.dark_mode = False
@@ -37,14 +36,12 @@ class App(tk.Tk):
         }
 
         # --- Paths & Config ---
-        # Use home directory for config to avoid permission issues in Program Files / Applications
-        self.user_home = os.path.expanduser("~")
-        self.config_path = os.path.join(self.user_home, ".yt_downloader_config.json")
-
         if getattr(sys, 'frozen', False):
             self.base_path = sys._MEIPASS
+            self.config_path = os.path.join(os.path.dirname(sys.executable), "config.json")
         else:
             self.base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            self.config_path = os.path.join(self.base_path, "config.json")
 
         exe_ext = ".exe" if sys.platform == "win32" else ""
         self.yt_dlp_path = os.path.join(self.base_path, "bin", f"yt-dlp{exe_ext}")
@@ -378,7 +375,6 @@ class App(tk.Tk):
             def process_subs(source, target_list, tag):
                 for lang_code, sub_list in source.items():
                     name = sub_list[0].get('name', lang_code)
-                    # Don't dedupe here, as same lang might be in both manual and auto
                     label = f"[{tag}] {lang_code} - {name}"
                     target_list.append(label)
 
@@ -473,7 +469,7 @@ class App(tk.Tk):
             initialdir=self.save_path_var.get(),
             initialfile=f"{sanitized_title}.{output_format}",
             defaultextension=f".{output_format}",
-            filetypes=[(f"{output_format.upper()} Files", f"*.{output_format}"), ("All Files", "*.*")]
+            filetypes=[(f"{output_format.upper()} Files", f"*.{output_format}"), ("All Files", "*.* אמיתי")]
         )
 
         if not save_path: return
@@ -488,18 +484,19 @@ class App(tk.Tk):
             elif video_id: command.extend(["-f", f"{video_id}"])
             if output_format in ['mp4', 'mkv']: command.extend(["--merge-output-format", output_format])
 
-        # Embed Subs logic
         if self.embed_subs_var.get():
-            # Extract just the lang code from "en - English (Manual)"
             full_text = self.sub_lang_combo.get()
-            if full_text and " - " in full_text:
-                lang_code = full_text.split(" - ")[0]
-                command.extend(["--write-subs", "--write-auto-subs", "--embed-subs", "--sub-langs", lang_code])
+            if " - " in full_text:
+                try:
+                    prefix_part = full_text.split(" - ")[0]
+                    lang_code = prefix_part.split(" ")[-1]
+                    command.extend(["--write-subs", "--write-auto-subs", "--embed-subs", "--sub-langs", lang_code])
+                except:
+                    command.extend(["--write-subs", "--write-auto-subs", "--embed-subs", "--sub-langs", "all,-live_chat"])
             else:
-                # Fallback if parsing fails or "all" is somehow selected manually
                 command.extend(["--write-subs", "--write-auto-subs", "--embed-subs", "--sub-langs", "all,-live_chat"])
             
-            # Prevent 429 Too Many Requests when downloading subs
+            # Prevent rate limiting
             command.extend(["--sleep-subtitles", "2"])
 
         command.extend([

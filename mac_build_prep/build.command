@@ -17,7 +17,7 @@ source venv/bin/activate
 
 # 2. 安裝 PyInstaller 和 Instaloader
 echo "正在安裝依賴套件..."
-pip install pyinstaller instaloader --quiet
+pip install pyinstaller instaloader certifi Pillow --quiet
 
 # 3. 準備 bin 資料夾
 mkdir -p bin
@@ -47,7 +47,7 @@ xattr -d com.apple.quarantine bin/ffmpeg 2>/dev/null
 echo "正在打包應用程式 (.app)..."
 # 清理舊的 build
 rm -rf build dist *.spec
-pyinstaller --name "YouTubeDownloader" --onefile --windowed --add-data "bin:bin" main.py
+pyinstaller --name "YouTubeDownloader" --onefile --windowed --add-data "bin:bin" --hidden-import=PIL --hidden-import=PIL._tkinter_finder --hidden-import=PIL.Image --hidden-import=PIL.ImageTk main.py
 
 # 7. 製作 .pkg 安裝檔
 echo "------------------------------------------"
