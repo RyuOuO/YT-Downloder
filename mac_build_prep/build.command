@@ -38,16 +38,20 @@ if [ ! -f "bin/ffmpeg" ]; then
     chmod +x bin/ffmpeg
 fi
 
-# 移除 macOS 安全隔離屬性
+# 移除 macOS 安全隔離屬性 (避免無法執行)
 echo "正在處理檔案權限..."
 xattr -d com.apple.quarantine bin/yt-dlp 2>/dev/null
 xattr -d com.apple.quarantine bin/ffmpeg 2>/dev/null
 
-# 6. 開始打包 .app
-echo "正在打包應用程式 (.app)..."
+# 取得 PIL 安裝路徑
+PIL_PATH=$(python -c "import PIL; import os; print(os.path.dirname(PIL.__file__))")
+echo "PIL 路徑: $PIL_PATH"
+
+# 6. 開始打包
+echo "正在打包應用程式，請稍候..."
 # 清理舊的 build
 rm -rf build dist *.spec
-python -m PyInstaller --name "YouTubeDownloader" --onefile --windowed --add-data "bin:bin" --hidden-import=PIL --hidden-import=PIL._tkinter_finder --hidden-import=PIL.Image --hidden-import=PIL.ImageTk main.py
+python -m PyInstaller --name "YouTubeDownloader" --onefile --windowed --add-data "bin:bin" --paths "$PIL_PATH" --hidden-import=PIL --hidden-import=PIL._tkinter_finder --hidden-import=PIL.Image --hidden-import=PIL.ImageTk main.py
 
 # 7. 製作 .pkg 安裝檔
 echo "------------------------------------------"
