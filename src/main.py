@@ -7,11 +7,16 @@ import threading
 import sys
 import re
 import instaloader
+import urllib.request
+import webbrowser
+
+CURRENT_VERSION = "v1.1.0"
+GITHUB_REPO = "RyuOuO/YT-Downloder"
 
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Universal Video & IG Photo Downloader")
+        self.title(f"Universal Video & IG Photo Downloader ({CURRENT_VERSION})")
         self.geometry("850x750")
         
         # --- High DPI Support (macOS & Windows) ---
@@ -21,10 +26,9 @@ class App(tk.Tk):
             windll.shcore.SetProcessDpiAwareness(1)
         except:
             pass
-            
-        # macOS High DPI is usually handled automatically by Tkinter 8.6+, 
-        # but we ensure the scaling is reasonable.
-        # scaling = self.call('tk', 'scaling') 
+
+        # --- Auto-Update Check ---
+        self.after(1000, self.check_for_updates)
 
         # --- Performance Optimization: Log Buffering ---
         self.log_queue = []
@@ -202,6 +206,39 @@ class App(tk.Tk):
         if path:
             self.save_path_var.set(path)
             self.log(f"Save directory: {path}")
+
+    def check_for_updates(self):
+        """Checks GitHub for the latest release."""
+        def _check():
+            try:
+                url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+                with urllib.request.urlopen(url) as response:
+                    data = json.loads(response.read().decode())
+                    latest_version = data.get("tag_name", "")
+                    
+                    # Simple string comparison (assumes vX.Y.Z format)
+                    if latest_version and latest_version != CURRENT_VERSION:
+                        # If latest is v1.2.0 and current is v1.1.0, prompt
+                        # (Ideally use semver, but string compare works if format is consistent)
+                        if self.is_newer(latest_version, CURRENT_VERSION):
+                            self.after_idle(lambda: self.prompt_update(latest_version, data.get("html_url")))
+            except Exception as e:
+                print(f"Update check failed: {e}")
+
+        threading.Thread(target=_check, daemon=True).start()
+
+    def is_newer(self, v1, v2):
+        """Returns True if v1 > v2. Handles 'v' prefix."""
+        def parse(v):
+            return [int(x) for x in v.lstrip('v').split('.')]
+        try:
+            return parse(v1) > parse(v2)
+        except:
+            return False
+
+    def prompt_update(self, version, url):
+        if messagebox.askyesno("Update Available", f"A new version ({version}) is available!\nDo you want to download it now?"):
+            webbrowser.open(url)
 
     def log(self, message):
         """Buffers log messages to prevent UI freezing."""
