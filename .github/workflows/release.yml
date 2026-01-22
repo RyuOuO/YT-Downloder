@@ -53,7 +53,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install pyinstaller instaloader Pillow
+          python -m pip install pyinstaller instaloader Pillow
 
       - name: Download tools
         run: |

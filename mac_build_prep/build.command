@@ -12,12 +12,13 @@ if [ ! -d "venv" ]; then
     python3 -m venv venv
 fi
 
-# 啟動虛擬環境
-source venv/bin/activate
+# 啟動虛擬環境 (Optional, but using direct path is safer)
+# source venv/bin/activate
+PYTHON_EXEC="venv/bin/python"
 
 # 2. 安裝 PyInstaller 和 Instaloader
 echo "正在安裝依賴套件..."
-pip install pyinstaller instaloader certifi Pillow --quiet
+$PYTHON_EXEC -m pip install pyinstaller instaloader certifi Pillow --quiet
 
 # 3. 準備 bin 資料夾
 mkdir -p bin
@@ -44,14 +45,14 @@ xattr -d com.apple.quarantine bin/yt-dlp 2>/dev/null
 xattr -d com.apple.quarantine bin/ffmpeg 2>/dev/null
 
 # 取得 PIL 安裝路徑
-PIL_PATH=$(python -c "import PIL; import os; print(os.path.dirname(PIL.__file__))")
+PIL_PATH=$($PYTHON_EXEC -c "import PIL; import os; print(os.path.dirname(PIL.__file__))")
 echo "PIL 路徑: $PIL_PATH"
 
 # 6. 開始打包
 echo "正在打包應用程式，請稍候..."
 # 清理舊的 build
 rm -rf build dist *.spec
-python -m PyInstaller --name "YouTubeDownloader" --onefile --windowed --add-data "bin:bin" --add-data "$PIL_PATH:PIL" --paths "$PIL_PATH" --hidden-import=PIL --hidden-import=PIL._tkinter_finder --hidden-import=PIL.Image --hidden-import=PIL.ImageTk main.py
+$PYTHON_EXEC -m PyInstaller --name "YouTubeDownloader" --onefile --windowed --add-data "bin:bin" --add-data "$PIL_PATH:PIL" --paths "$PIL_PATH" --hidden-import=PIL --hidden-import=PIL._tkinter_finder --hidden-import=PIL.Image --hidden-import=PIL.ImageTk main.py
 
 # 7. 製作 .pkg 安裝檔
 echo "------------------------------------------"

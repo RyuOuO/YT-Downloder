@@ -20,7 +20,7 @@ jobs:
 
     - name: 安裝依賴
       run: |
-        pip install pyinstaller instaloader
+        python -m pip install pyinstaller instaloader certifi Pillow
 
     - name: 準備下載工具 (yt-dlp & ffmpeg)
       run: |
