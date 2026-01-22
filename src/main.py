@@ -13,6 +13,23 @@ class App(tk.Tk):
         super().__init__()
         self.title("Universal Video & IG Photo Downloader")
         self.geometry("850x750")
+        
+        # --- High DPI Support (macOS & Windows) ---
+        try:
+            # Windows
+            from ctypes import windll
+            windll.shcore.SetProcessDpiAwareness(1)
+        except:
+            pass
+            
+        # macOS High DPI is usually handled automatically by Tkinter 8.6+, 
+        # but we ensure the scaling is reasonable.
+        # scaling = self.call('tk', 'scaling') 
+
+        # --- Performance Optimization: Log Buffering ---
+        self.log_queue = []
+        self.is_log_updating = False
+        self.update_log_interval = 100 # ms
 
         # --- Paths & Config ---
         if getattr(sys, 'frozen', False):
@@ -187,8 +204,28 @@ class App(tk.Tk):
             self.log(f"Save directory: {path}")
 
     def log(self, message):
-        self.output_text.insert(tk.END, message.strip() + "\n")
-        self.output_text.see(tk.END)
+        """Buffers log messages to prevent UI freezing."""
+        self.log_queue.append(message.strip())
+        if not self.is_log_updating:
+            self.is_log_updating = True
+            self.after(self.update_log_interval, self.process_log_queue)
+
+    def process_log_queue(self):
+        """Updates the UI with buffered messages."""
+        if self.log_queue:
+            # Batch insert
+            messages = "\n".join(self.log_queue)
+            self.log_queue = [] # Clear buffer
+            
+            self.output_text.insert(tk.END, messages + "\n")
+            self.output_text.see(tk.END)
+        
+        # Keep checking if there are more messages coming in (if process still running)
+        # But if queue is empty, we can stop the loop until next log call to save CPU
+        self.is_log_updating = False
+        if self.log_queue: # If new messages arrived while processing
+             self.is_log_updating = True
+             self.after(self.update_log_interval, self.process_log_queue)
 
     def start_analysis(self):
         url = self.url_var.get().strip()
