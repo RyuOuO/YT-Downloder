@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import messagebox, filedialog
+from tkinter import messagebox, filedialog, scrolledtext
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 import subprocess
