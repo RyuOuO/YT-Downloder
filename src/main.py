@@ -169,11 +169,11 @@ class App(ttk.Window):
         self.progressbar.pack(fill=X)
 
         # Log
-        log_expander = ttk.Expander(main_frame, text="Show Logs", bootstyle="light")
-        log_expander.pack(fill=X, pady=5)
+        log_frame = ttk.Labelframe(main_frame, text="Log Output", padding=5, bootstyle="secondary")
+        log_frame.pack(fill=BOTH, expand=True, pady=(5, 0))
         
-        self.output_text = scrolledtext.ScrolledText(log_expander, height=8, font=("Consolas", 9), bg="#222", fg="#ddd", insertbackground="white")
-        self.output_text.pack(fill=BOTH, expand=True) # Note: user needs to click expander to see
+        self.output_text = scrolledtext.ScrolledText(log_frame, height=8, font=("Consolas", 9), bg="#222", fg="#ddd", insertbackground="white")
+        self.output_text.pack(fill=BOTH, expand=True)
 
     # --- Logic (Kept mostly same, adjusted for new widgets) ---
     # ... [Same helper methods as before: check_clipboard, load_thumbnail, etc.] ...
